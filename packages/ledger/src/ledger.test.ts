@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { money, type Money, type SqlClient } from '@chema/shared';
-import { migratedTestDb } from '@chema/shared/testing';
+import { insertTestWallet, migratedTestDb } from '@chema/shared/testing';
 import {
   accountCode,
   AlreadyReversedError,
@@ -106,7 +106,7 @@ async function payOut(w: TestWallet, minor: bigint, account: LedgerAccount = w.c
 
 describe('accounts', () => {
   it('bootstraps a wallet idempotently and names accounts', async () => {
-    const walletId = randomUUID();
+    const walletId = await insertTestWallet(db, randomUUID());
     const first = await inTx(db, (tx) => bootstrapWalletAccounts(tx, walletId, 'USD'));
     const again = await inTx(db, (tx) => bootstrapWalletAccounts(tx, walletId, 'USD'));
     expect(again).toEqual(first);

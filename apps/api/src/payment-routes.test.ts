@@ -33,14 +33,14 @@ describe('payment routes', () => {
     const res = await app.inject({ method: 'GET', url: '/payments/rails' });
     expect(res.json()).toEqual({ rails: ['CARD', 'ECOCASH'] });
     const c = await t.h.customer();
-    expect((await initiate(c.token, t.newWallet(), 'ONEMONEY')).statusCode).toBe(404);
+    expect((await initiate(c.token, (await t.newWallet()), 'ONEMONEY')).statusCode).toBe(404);
     const hook = await app.inject({ method: 'POST', url: '/webhooks/ONEMONEY', headers: { 'content-type': 'application/json' }, payload: '{}' });
     expect(hook.statusCode).toBe(404);
   });
 
   it('initiate needs a session and an Idempotency-Key; replay returns the same payment', async () => {
     const c = await t.h.customer();
-    const walletId = t.newWallet();
+    const walletId = await t.newWallet();
     expect((await app.inject({ method: 'POST', url: '/payments', payload: {} })).statusCode).toBe(401);
     const noKey = await app.inject({
       method: 'POST',
@@ -64,7 +64,7 @@ describe('payment routes', () => {
 
   it('webhook: forged ⇒ 401, genuine ⇒ 202 then replay ⇒ 200; credit visible on the payment and receipt', async () => {
     const c = await t.h.customer();
-    const walletId = t.newWallet();
+    const walletId = await t.newWallet();
     const { id } = (await initiate(c.token, walletId)).json<{ id: string }>();
     t.ecocash.succeed(t.ecocash.providerRefFor(id)!);
     const [w] = t.ecocash.takeWebhooks();

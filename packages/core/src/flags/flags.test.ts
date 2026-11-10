@@ -61,6 +61,7 @@ describe('flag registry safe defaults', () => {
       'approvals.payout_high_value_minor',
       'verification.evidence_types',
       'verification.sla_hours',
+      'fraud.velocity_max_drafts_24h',
       'claims.auto_approve_limit_minor',
       'closure.excess_funds_policy',
       'refund.policy',

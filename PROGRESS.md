@@ -7,7 +7,7 @@
 | P01 identity/audit/consent | done | 2026-11-10 |
 | P02 ledger | done | 2026-11-10 |
 | P03 payments | done | 2026-11-10 |
-| P04 wallet + verification | todo | |
+| P04 wallet + verification | done | 2026-11-10 |
 | P05 public page + contribute | todo | |
 | P06 Fidelity claims link | todo | |
 | P07 payouts/governance/closure | todo | |
@@ -46,6 +46,16 @@
 - 2026-11-10 — P03: refund = maker-checker (`payment.refund` / `payment.refund.approve`, opsfin, maker ≠ checker). Executing debits the wallet into REFUND_CLEARING at once (unspendable); provider confirmation moves REFUND_CLEARING → PROVIDER_CLEARING and completes it; provider refusal reverses the debit.
 - 2026-11-10 — P03: chargeback = DISPUTE_OPENED places a TXN hold for the disputed amount on that payment's credit only + CHARGEBACK case; CHARGEBACK releases it and debits min(amount, available, not-yet-compensated) to REFUND_CLEARING; any shortfall is parked in SUSPENSE_UNMATCHED + CHARGEBACK_SHORTFALL exception. Never negative; no loss-bearer chosen (human ADJUSTMENT later).
 - 2026-11-10 — P03: recon differences within tolerance post to new system account `SYS:RECON_DIFF` (migration 0010 widens the kind CHECK); short settlement beyond tolerance = TXN hold for the shortfall on that payment only; over-settlement and unmatched rows go to SUSPENSE_UNMATCHED. Re-running a day is idempotent.
+- 2026-11-10 — P04: new package `@chema/wallet` (core + ledger), like `@chema/payments`: wallet lifecycle, community verification, activation, FraudRules, reports. Channels run its commands through `core.bus`.
+- 2026-11-10 — P04: wallet state machine enforced twice — `ConflictError`s in commands and the `wallet_guard` trigger (legal transitions only, immutable identity columns, set-once slug/verified_at, deceased details frozen after DRAFT, no DELETE). CHECKs: slug only in ACTIVE/SUSPENDED/CLOSING/CLOSED, and ACTIVE ⇒ slug + verified_at. Every status change writes append-only `wallet_status_event` (who, role, reason, note, case).
+- 2026-11-10 — P04: reviewer ≠ submitter ≠ creator ≠ admin ≠ anyone holding a wallet_role, checked three ways: matrix `assigned_not_own_case` (audited DENIED), handler `isParty` (ForbiddenError REVIEWER_IS_PARTY, rolled back, not audited), and trigger `verification_case_reviewer_guard`. An appeal must be decided by a different reviewer than the one who rejected it.
+- 2026-11-10 — P04: evidence standard = completeness only (one accepted `verification.evidence_types` death proof + ADMIN_ID + MANDATE, each malware-scanned CLEAN); `MissingEvidenceError.missing` names the gaps (API 409 `{error:'missing_evidence', missing}`). Evidence types are on `verification_evidence` rows, each type pinned to a document class.
+- 2026-11-10 — P04: APPROVED needs every checklist item PASS and no open fraud flag; REJECTED/MORE_INFO need notes. One open case per wallet (partial unique index); decision columns set-once. Parallel submits/decides proven on real Postgres (`packages/wallet/src/concurrency.test.ts`).
+- 2026-11-10 — P04: public slug = 128 random bits, base32 lowercase (26 chars). QR (`qrcode`, SVG) and share text are built on demand from the slug, never stored. Badge copy is the existing i18n key `badge.verified.tooltip`.
+- 2026-11-10 — P04: public endpoints `/public/wallets/:slug[/qr.svg|/report]` give 404 for unknown, malformed and every non-ACTIVE slug (SUSPENDED included). `verifiedWalletGate` (ACTIVE + slug + verified_at) replaces `DENY_ALL_GATE` in `apps/api/src/payments.ts`.
+- 2026-11-10 — P04: fraud rules (`DeterministicFraudRules`) run at create, add-evidence and submit, and only write idempotent `fraud_flag` rows (dedupe_key). Status never changes. Flags are visible to verifiers and oversight only, not to the family or the assisting agent.
+- 2026-11-10 — P04: `wallet_id` FKs added (migration 0012) on wallet_role, staff_assignment, approval, consent_record, document.linked_wallet, ledger_account, ledger_journal, ledger_reservation, hold, payment, case_record, receipt, recon_exception. Test fixtures go through `insertTestWallet` (`@chema/shared/testing`). `payments.newWallet()` is now async.
+- 2026-11-10 — P04: web = Next.js 16 app router in `apps/web` (draft form, evidence upload, status page; client components calling the API). It has its own tsconfig (DOM lib); root `typecheck` runs both. CI also runs `next build`.
 - 2026-11-10 — P03: rail flags gate NEW money only (initiate, rail list, webhook intake ⇒ 404 when off). Polling and recon still use the adapter for payments already in flight, so switching a rail off cannot strand moving money.
 
 ## Assumptions (not in spec; safest default taken)
@@ -89,19 +99,26 @@
 - P03 mock webhook wire format + HMAC-SHA256 over `${ts}.${body}` (headers `x-chema-signature: v1=…`, `x-chema-timestamp`) is ours; each real adapter implements its provider's scheme. `CHEMA_MOCK_WEBHOOK_SECRET` (≥16 chars) or a per-process random secret.
 - P03 `recon_exception.escalation_level` exists but nothing escalates yet (P09); the column is not in the set-once list, so P09 adds a migration to move it.
 
+- P04 MORE_INFO sends the wallet back to DRAFT (a transition docs/03 does not list). The family adds evidence and resubmits, which opens a new case.
+- P04 agent-assisted drafts: the agent supplies `adminPhone` (find-or-create person). The agent gets wallet_role AGENT and the family member ADMIN. Submit is refused (`ADMIN_NOT_CONFIRMED`) until that admin has a verified identity_binding (has logged in by OTP once).
+- P04 roles: suspend/unsuspend and verifier assignment = FIDELITY_ADMIN only, with a written note of at least 10 characters plus a reason code. Verifiers see only cases assigned to them (`staff_assignment`); FIDELITY_ADMIN routes the queue. `wallet.view` = admin, approver, assigned agent/verifier, auditor, fidelity_admin.
+- P04 photo is NOT taken at create (the columns exist, with a CHECK that photo needs consent). Public photos and their consent flow are P05.
+- P04 share text is pronoun-neutral ("give them") because we collect no pronoun. The public view shows only name, funeral date, badge and share links. Privacy-driven fields are P05.
+- P04 fraud velocity: more than `fraud.velocity_max_drafts_24h` (unset ⇒ 3) drafts per creator in 24 h ⇒ flag. It applies to agents too. Flags are review tasks only, so the stricter default is safe.
+- P04 suspicious-wallet reports: only for ACTIVE wallets. A report opens `case_record` type FRAUD and changes no status. Anonymous reports run as SYSTEM with an HMAC-keyed IP hash (`CHEMA_REPORT_IP_KEY`, else random per process). Limit 5/hour per reporter.
+- P04 `CHEMA_PUBLIC_BASE_URL` (default `http://localhost:3000`) builds share links/QR; web reads `NEXT_PUBLIC_API_URL` (default `http://localhost:7600`).
+
 ## Gotchas / handoff to next phase
 - New state change = a `Command {name, resolve, run}` run through `core.bus.execute`. Add its action to `ACTIONS` + `MATRIX` (`packages/core/src/authz/matrix.ts`) AND to the independent `EXPECTED` table in `matrix.test.ts` (the test fails if either is missing). Step-up actions: `STEP_UP_ACTIONS`; maker→checker pairs: `CHECKER_ACTION`.
 - Maker-checker: in the maker command call `createApproval(tx, actor, {action, subject…, payload})`; the checker runs `decideApproval`; the maker then executes with `consumeApproval(tx, actor, id, {…same payload})`. `requiresDual(action, amount, threshold)` says whether a checker is needed. Escalation for an unavailable approver is NOT built (P07).
 - Inside a bus handler/transaction never touch `db` directly or call a service that does (PGlite has one connection ⇒ deadlock; pg would read outside the tx). Use the `tx`, e.g. `flags.getIn(tx, key)`.
 - SQL trap: `SELECT seq::text AS seq … ORDER BY seq` sorts as TEXT ('10' < '2'). Qualify the column (`ORDER BY audit_log.seq`). This was a real bug here.
-- P04 must add FKs to `wallet(id)` on `wallet_role.wallet_id`, `staff_assignment.wallet_id`, `approval.wallet_id`, `consent_record.wallet_id`, `document.linked_wallet`, and create the `wallet_role ADMIN` row inside the create-draft command.
 - Not built yet: bus commands for role admin (`role.admin`: grant/revoke `wallet_role`, `staff_assignment`, staff enrol/disable) and for applying a flag change. `StaffAuthService.enroll` and `FlagService.set` are callable only from code/tests (no HTTP route, no seed CLI). P09 wraps them.
 - Audit: `pnpm audit:verify` (exit 1 + first bad seq). Detects edits, deletions, forks; truncating the NEWEST rows needs an externally anchored chain head (P09/P10).
 - Tests: `createHarness()` from `@chema/core/testing` = PGlite + real services + mock OTP/blobs + controllable clock (`h.customer()`, `h.staff(role)`, `h.grantRole`, `h.assign`, `h.advance(ms)`).
 - Outbox: `enqueueOutbox(tx, topic, payload)` in the producer's tx; topics so far `document.scan`, `document.purge`; handlers live in `apps/api/src/worker.ts` (`pnpm dev:worker`, compose service `worker`) and must be idempotent. The BullMQ test only runs with `REDIS_URL` set.
 - `auth_session.device_ref` is stored but device binding is not enforced; no general HTTP rate limiting beyond OTP/staff lockout (P10).
 - Ledger (P02): `@chema/ledger` — `bootstrapWalletAccounts`, `ensureGroupAccount`, `ensureSystemAccount`, `post`, `reverse`, `reserve`, `release`, `placeHold`, `releaseHold`, `getBalances`, `getStatement`, `lockWallet`. Contribution = DR `SYS:PROVIDER_CLEARING:<RAIL>` / CR `W:COMMUNITY` (+ CR `SYS:FEES`); payout = `reserve` → (approvals) → `post({kind:'PAYOUT', reservationId})` DR wallet / CR `SYS:PAYOUT_CLEARING:<RAIL>`; failed request ⇒ `release`.
-- P04 must also: add FK to `wallet(id)` on `ledger_account.wallet_id`, `ledger_reservation.wallet_id`, `hold.wallet_id`; call `bootstrapWalletAccounts` inside create-draft (same tx).
 - P07/P09: wrap `reserve/release/placeHold/releaseHold/reverse` and ADJUSTMENT posts in bus commands (matrix actions + maker-checker for `ledger.adjust`, hold release). The ledger checks books, not people.
 - Ledger tests: `@chema/ledger/testing` (`inTx`, `seedSystem`, `seedWallet`, `creditWallet`). `inTx` bypasses the bus — tests only. Model-based property suite: `ledger.property.test.ts` (fast-check, 100 runs × ≤40 ops). For real concurrency: `docker compose up -d postgres` then `CHEMA_TEST_DATABASE_URL=postgres://chema:change-me@localhost:55432/chema pnpm vitest run packages/ledger`; `realPgTestDb()` in `@chema/shared/testing` creates + drops a throwaway database.
 - Ledger SQL: never `UPDATE`/`DELETE` ledger rows; corrections are `reverse()` or a new journal. Insert all entries of a journal in one statement or the seal trigger rejects them.
@@ -109,7 +126,13 @@
 - Vitest capped at 2 workers (RAM). pino `formatters.log` runs before serializers: never deep-walk class instances there.
 - Ports: api 7600, postgres 55432, redis 56379.
 - Payments (P03): channels call `PaymentService` (`@chema/payments`) only: `listRails`, `initiate`, `view`, `receipt`, `receiveWebhook`, `processEvent` (worker), `pollDue` (worker loop), `requestRefund`, `runRecon`, `listExceptions`, `balances` (fills `pending`). Tests: `createPaymentsHarness(flags, {db?})` from `@chema/payments/testing` (mock rails on the harness clock, `t.newWallet()` opens the gate, `t.deliver(rail)` = webhook + worker).
-- P04/P05 must: replace `DENY_ALL_GATE` in `apps/api/src/payments.ts` with a gate that accepts only verified, published wallets; add FKs to `wallet(id)` on `payment.wallet_id`, `case_record.wallet_id`, `receipt.wallet_id`, `recon_exception.wallet_id`.
 - P07 owns: dispute/case workflow on `case_record` (stub), exception resolution + hold release with maker-checker, refunds of partly spent wallets (D11), payouts via `adapter.payout` (interface only so far).
 - Mock rails (`@chema/providers`): `MockRail.scenario` switches + driver methods `succeed/fail/expire/openDispute/chargeback/winDispute/addSettlementRow/takeWebhooks`. Callbacks are signed when due, so advancing the clock past the window makes queued ones stale.
-- Next migration = 0011.
+- Wallet (P04): `walletCommands(deps)` from `@chema/wallet` = `createDraft view addEvidence submit appeal assign queue decide suspend unsuspend report reviewFlag`. Public reads (no bus): `publicWalletView`, `publicWalletQr`, `loadPublicWallet` (404 unless ACTIVE). Gate: `verifiedWalletGate`. Tests: `createWalletHarness()` from `@chema/wallet/testing` (`t.draft`, `t.fullEvidence`, `t.verifier`, `t.assignVerifier`, `t.activeWallet()` → ACTIVE wallet + slug; `ALL_PASS` checklist).
+- Any new table with `wallet_id` needs an FK to `wallet(id)`. Tests below the wallet package create the row with `insertTestWallet(q, id)`.
+- P05 builds on: `/public/wallets/:slug` (extend the view under `wallet.privacy`), the `/w/:slug` page in apps/web (share links already point there), photo + consent, tribute wall. Contributions already pass the gate for ACTIVE wallets.
+- P06: `fidelity_link` table exists (stub: policy_no/national_id, route_status UNSET, claim_status_mirror NONE), one row per wallet. Verification never reads it; keep it that way.
+- P07: wallet ACTIVE → CLOSING → CLOSED transitions exist in `wallet_guard` but have no command yet. A mandate is approved with the case (`mandate.approved_at`): "no mandate ⇒ no payouts" should check it. `wallet.replace_admin` will need a migration, because `admin_person` is immutable in `wallet_guard`.
+- P08/P09: wallet outbox topics (`WALLET_TOPICS`) are logged-only in the worker. Real notifications, the fraud-case workflow and the report queue UI come later. A REVIEWER_IS_PARTY denial is not audited (thrown in the handler); P10 could move it into a resolve-time subject field.
+- Web: `pnpm --filter @chema/web dev` (port 3000). Login cannot complete against the running API (OTP is a mock), so the screens are exercised by `next build` + API tests.
+- Next migration = 0013.

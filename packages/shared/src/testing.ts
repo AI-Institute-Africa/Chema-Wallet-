@@ -1,7 +1,7 @@
 // Test-only helpers. Never import from runtime code.
 import { randomBytes } from 'node:crypto';
 import pg from 'pg';
-import type { SqlClient } from './db/client';
+import type { Queryable, SqlClient } from './db/client';
 import { migrate } from './db/migrate';
 import { MIGRATIONS_DIR } from './db/paths';
 import { createPgClient } from './db/pg';
@@ -14,6 +14,24 @@ export async function migratedTestDb(): Promise<SqlClient> {
   const db = await createPgliteClient();
   await migrate(db, MIGRATIONS_DIR);
   return db;
+}
+
+/**
+ * Raw-SQL fixture: a DRAFT wallet row with this id (no-op if it exists), so
+ * tests below the wallet package can satisfy the wallet(id) foreign keys.
+ * Runtime code creates wallets only through the wallet.create_draft command.
+ */
+export async function insertTestWallet(q: Queryable, id: string, currency: 'USD' | 'ZWG' = 'USD'): Promise<string> {
+  const { rows } = await q.query<{ id: string }>("INSERT INTO person (name) VALUES ('fixture-wallet-admin') RETURNING id");
+  const person = rows[0]?.id;
+  await q.query(
+    `INSERT INTO wallet (id, deceased_name, deceased_name_norm, date_of_death, funeral_location, funeral_location_norm,
+                         currency, admin_person, created_by, created_by_kind, source_channel)
+     VALUES ($1, 'Fixture', 'fixture', DATE '2026-11-01', 'Harare', 'harare', $2, $3, $3, 'CUSTOMER', 'WEB')
+     ON CONFLICT (id) DO NOTHING`,
+    [id, currency, person],
+  );
+  return id;
 }
 
 async function asAdmin(adminUrl: string, sql: string): Promise<void> {

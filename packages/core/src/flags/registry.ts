@@ -153,6 +153,9 @@ export const FLAGS = {
     ['DEATH_CERTIFICATE', 'PARLOUR_CONFIRMATION', 'BURIAL_ORDER'],
   ),
   'verification.sla_hours': int({ description: 'Verification SLA; unset ⇒ no SLA promised in UI.', decision: 'D05', financial: false }),
+  // Fraud rules only raise review tasks (never adverse action), so the unset
+  // default is the stricter built-in limit (3 drafts per creator per 24 h).
+  'fraud.velocity_max_drafts_24h': int({ description: 'Drafts per creator per 24 h before a velocity review flag; unset ⇒ 3.', financial: false }),
 
   // ── Recon (D09) ───────────────────────────────────────────────────────
   ...reconTolerances(),

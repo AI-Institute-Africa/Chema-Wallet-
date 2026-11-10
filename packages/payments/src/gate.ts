@@ -1,6 +1,6 @@
 // Contributions are blocked until community verification is approved
-// (CLAUDE.md invariant). P03 has no wallet table yet, so the production gate
-// refuses everything; P04/P05 replace it with the verification check.
+// (CLAUDE.md invariant). The production gate is `verifiedWalletGate` from
+// @chema/wallet (P04); DENY_ALL_GATE remains as the fail-closed fallback.
 import type { Queryable } from '@chema/shared';
 
 export interface ContributionGate {

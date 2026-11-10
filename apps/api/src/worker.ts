@@ -11,6 +11,7 @@ import {
 } from '@chema/core';
 import { BullMqJobQueue, createOutboxWorker } from '@chema/core/bullmq';
 import { createLogger, createPgClient } from '@chema/shared';
+import { WALLET_TOPICS } from '@chema/wallet';
 import { z } from 'zod';
 import { buildPayments } from './payments';
 
@@ -34,8 +35,23 @@ const DocPayload = z.object({ documentId: z.uuid() });
 const EventPayload = z.object({ eventRowId: z.uuid() });
 const ReceiptPayload = z.object({ receiptId: z.uuid() });
 const PurgePayload = z.object({ documentId: z.uuid(), storageRef: z.string() });
+const WalletEventPayload = z.object({ walletId: z.uuid() }).loose();
+
+// Wallet lifecycle events (docs/05). Family/staff notification channels are
+// D16 + P08/P09; until then each event is acknowledged and logged (ids only).
+// A delivery failure never touches wallet state.
+const walletHandlers = Object.fromEntries(
+  WALLET_TOPICS.map((topic) => [
+    topic,
+    async (payload: unknown) => {
+      const { walletId } = WalletEventPayload.parse(payload);
+      log.info({ topic, walletId }, 'wallet event (mock notification channel)');
+    },
+  ]),
+);
 
 const outboxWorker = createOutboxWorker(redisUrl, {
+  ...walletHandlers,
   'document.scan': async (payload) => {
     const { documentId } = DocPayload.parse(payload);
     await core.bus.execute(core.documents.applyScan, { documentId }, { actor: SYSTEM_ACTOR });

@@ -171,7 +171,7 @@ describe('journal shape (trigger ledger_journal_guard)', () => {
       [w.community.id, 'C', 100n],
     ];
     await expect(rawPost({ walletId: null }, lines)).rejects.toThrow(/wallet_id does not match/);
-    await expect(rawPost({ walletId: randomUUID() }, lines)).rejects.toThrow(/wallet_id does not match/);
+    await expect(rawPost({ walletId: (await seedWallet(db)).walletId }, lines)).rejects.toThrow(/wallet_id does not match/);
   });
 
   it('refuses an entry in a currency other than its account', async () => {
@@ -268,7 +268,7 @@ describe('funds (trigger ledger_funds_guard, ledger_reservation_guard)', () => {
     await expect(rawReservation(db, w, w.community.id, 1_001n)).rejects.toThrow(/would exceed its balance/);
     await expect(rawReservation(db, w, w.community.id, 600n)).resolves.toBeTruthy();
     await expect(rawReservation(db, w, w.community.id, 401n)).rejects.toThrow(/would exceed its balance/);
-    await expect(rawReservation(db, w, w.community.id, 100n, randomUUID())).rejects.toThrow(/not on an account of its wallet/);
+    await expect(rawReservation(db, w, w.community.id, 100n, (await seedWallet(db)).walletId)).rejects.toThrow(/not on an account of its wallet/);
     await expect(rawReservation(db, w, usd.fees.id, 1n)).rejects.toThrow(/not on an account of its wallet/);
     // The reserved 600 cannot be debited either.
     await expect(

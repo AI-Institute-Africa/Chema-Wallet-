@@ -61,7 +61,11 @@ export function registerRoutes(app: FastifyInstance, core: CoreServices): void {
     if (err instanceof AuthenticationError) return reply.code(401).send({ error: 'authentication_failed' });
     if (err instanceof ForbiddenError) return reply.code(403).send({ error: 'forbidden' });
     if (err instanceof NotFoundError) return reply.code(404).send({ error: 'not_found' });
-    if (err instanceof ConflictError) return reply.code(409).send({ error: err.reason.toLowerCase() });
+    if (err instanceof ConflictError) {
+      // MissingEvidenceError (P04) names what is missing; nothing sensitive.
+      const missing = (err as { missing?: unknown }).missing;
+      return reply.code(409).send({ error: err.reason.toLowerCase(), ...(Array.isArray(missing) ? { missing } : {}) });
+    }
     if (err instanceof RateLimitedError) return reply.code(429).send({ error: 'rate_limited' });
     // Forged / stale provider callback: nothing was stored.
     if (err instanceof WebhookRejectedError) return reply.code(401).send({ error: 'webhook_rejected' });

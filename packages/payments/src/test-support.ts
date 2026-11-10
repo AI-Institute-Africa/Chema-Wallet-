@@ -6,6 +6,7 @@ import { envVarFor, type FlagKey } from '@chema/core';
 import { createHarness, type Harness } from '@chema/core/testing';
 import { MockCard, MockEcoCash, MockOneMoney, type MockRail } from '@chema/providers';
 import { money, type Currency, type SqlClient } from '@chema/shared';
+import { insertTestWallet } from '@chema/shared/testing';
 import type { ContributionGate } from './gate';
 import { RailRegistry } from './rails';
 import { PaymentService } from './service';
@@ -21,7 +22,7 @@ export interface PaymentsHarness {
   card: MockRail;
   /** Wallets the gate accepts. */
   open: Set<string>;
-  newWallet(): string;
+  newWallet(currency?: Currency): Promise<string>;
   /** Deliver every due callback of a rail through receive + process (as webhook + worker would). */
   deliver(rail: MockRail): Promise<{ outcome: string; duplicate: boolean }[]>;
   close(): Promise<void>;
@@ -58,8 +59,8 @@ export async function createPaymentsHarness(
     onemoney,
     card,
     open,
-    newWallet() {
-      const id = randomUUID();
+    async newWallet(currency: Currency = 'USD') {
+      const id = await insertTestWallet(h.db, randomUUID(), currency);
       open.add(id);
       return id;
     },

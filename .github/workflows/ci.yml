@@ -37,5 +37,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm verify
+      - name: Build web (Next.js)
+        run: pnpm --filter @chema/web build
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
       - name: Dependency audit
         run: pnpm audit --audit-level high

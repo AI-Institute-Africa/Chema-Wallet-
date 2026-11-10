@@ -20,7 +20,7 @@ const key = () => `k-${randomUUID()}`;
 
 async function paid(rail: Rail, minor: bigint, settlementDate: string) {
   const c = await t.h.customer();
-  const walletId = t.newWallet();
+  const walletId = await t.newWallet();
   const view = await t.service.initiate(c.actor, { walletId, rail: rail.rail, amount: usd(minor), idempotencyKey: key() });
   const providerRef = rail.providerRefFor(view.id)!;
   rail.succeed(providerRef, settlementDate);
@@ -79,7 +79,7 @@ describe('§L reconciliation', () => {
     const date = '2026-12-03';
     t.ecocash.scenario = { timeout: true };
     const c = await t.h.customer();
-    const walletId = t.newWallet();
+    const walletId = await t.newWallet();
     const view = await t.service.initiate(c.actor, { walletId, rail: 'ECOCASH', amount: usd(6_00n), idempotencyKey: key() });
     t.ecocash.scenario = {};
     const ref = t.ecocash.providerRefFor(view.id)!;
@@ -155,7 +155,7 @@ describe('database guards (raw SQL, bypassing the service)', () => {
   async function failedPayment() {
     t.ecocash.scenario = { reject: true };
     const c = await t.h.customer();
-    const v = await t.service.initiate(c.actor, { walletId: t.newWallet(), rail: 'ECOCASH', amount: usd(1_00n), idempotencyKey: key() });
+    const v = await t.service.initiate(c.actor, { walletId: (await t.newWallet()), rail: 'ECOCASH', amount: usd(1_00n), idempotencyKey: key() });
     t.ecocash.scenario = {};
     return v.id;
   }
@@ -181,7 +181,7 @@ describe('database guards (raw SQL, bypassing the service)', () => {
 
   it('an open payment cannot be marked SUCCEEDED with a forged credit', async () => {
     const c = await t.h.customer();
-    const v = await t.service.initiate(c.actor, { walletId: t.newWallet(), rail: 'ONEMONEY', amount: usd(1_00n), idempotencyKey: key() });
+    const v = await t.service.initiate(c.actor, { walletId: (await t.newWallet()), rail: 'ONEMONEY', amount: usd(1_00n), idempotencyKey: key() });
     const { rows } = await t.h.db.query<{ id: string }>("SELECT id FROM ledger_journal WHERE kind = 'CONTRIBUTION' LIMIT 1");
     await expect(
       t.h.db.query(
