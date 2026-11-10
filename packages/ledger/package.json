@@ -3,6 +3,16 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Double-entry ledger (P02)",
-  "exports": { ".": "./src/index.ts" }
+  "description": "Append-only double-entry ledger: journals, sub-ledger balances, reservations, holds (P02)",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/test-support.ts"
+  },
+  "dependencies": {
+    "@chema/core": "workspace:*",
+    "@chema/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "fast-check": "^4.10.2"
+  }
 }

@@ -10,6 +10,24 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    # Real Postgres for the ledger concurrency suite: PGlite has one connection,
+    # so only a real server shows whether parallel transactions can overdraw.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: chema
+          POSTGRES_PASSWORD: change-me
+          POSTGRES_DB: chema
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U chema -d chema"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      CHEMA_TEST_DATABASE_URL: postgres://chema:change-me@localhost:5432/chema
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
