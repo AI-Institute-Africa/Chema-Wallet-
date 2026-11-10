@@ -1,0 +1,8 @@
+{
+  "name": "@chema/fidelity",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Fidelity claims adapter (P06)",
+  "exports": { ".": "./src/index.ts" }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "@chema/admin",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Admin portal (Next.js arrives P09)",
+  "exports": { ".": "./src/index.ts" }
+}

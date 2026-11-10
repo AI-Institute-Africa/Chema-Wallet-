@@ -1,0 +1,14 @@
+{
+  "name": "@chema/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Core services: config/flags and domain commands",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@chema/shared": "workspace:*",
+    "zod": "^4.6.7"
+  }
+}
