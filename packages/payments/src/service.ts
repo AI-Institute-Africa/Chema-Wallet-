@@ -96,21 +96,29 @@ export class PaymentService {
   async initiate(actor: Actor, input: InitiateInput): Promise<PaymentView & { replayed: boolean }> {
     const r = await this.bus.execute(this.collect.initiate, input, { actor });
     if (!r.needsSubmission) return { ...r.payment, replayed: r.replayed };
-    // Same reference on every attempt: re-submitting is safe at the provider.
+    const view = await this.submit(r.payment, input.payerMsisdn);
+    return { ...view, replayed: r.replayed };
+  }
+
+  /**
+   * Send a created payment to its provider (outside any transaction) and
+   * record the answer. Safe to repeat: the provider reference is the payment
+   * id, and only an untouched INITIATED payment is updated.
+   */
+  async submit(payment: PaymentView, payerMsisdn?: string): Promise<PaymentView> {
     let outcome: SubmissionOutcome;
     try {
-      const res = await this.adapter(input.rail).collect({
-        reference: r.payment.id,
-        amount: r.payment.disclosure.totalCharged,
-        ...(input.payerMsisdn ? { payerMsisdn: input.payerMsisdn } : {}),
+      const res = await this.adapter(payment.rail).collect({
+        reference: payment.id,
+        amount: payment.disclosure.totalCharged,
+        ...(payerMsisdn ? { payerMsisdn } : {}),
         description: 'Chema Wallet contribution',
       });
       outcome = { kind: 'ACCEPTED', providerRef: res.providerRef, next: res.next };
     } catch (err) {
       outcome = submissionFailure(err);
     }
-    const view = await this.system(this.collect.recordSubmission, { paymentId: r.payment.id, outcome });
-    return { ...view, replayed: r.replayed };
+    return this.system(this.collect.recordSubmission, { paymentId: payment.id, outcome });
   }
 
   view(actor: Actor, paymentId: string): Promise<PaymentView> {

@@ -30,6 +30,8 @@ export function principalsOf(actor: Actor, relations: Relations): Principal[] {
   switch (actor.kind) {
     case 'SYSTEM':
       return ['system'];
+    case 'PUBLIC':
+      return ['public'];
     case 'CUSTOMER': {
       const out: Principal[] = ['contributor'];
       if (relations.walletRoles.has('ADMIN')) out.push('admin');
@@ -131,7 +133,7 @@ export class Authorizer {
   constructor(private readonly thresholds: ThresholdSource) {}
 
   async relations(q: Queryable, actor: Actor, subject: Subject): Promise<Relations> {
-    if (!subject.walletId || actor.kind === 'SYSTEM') return NO_RELATIONS;
+    if (!subject.walletId || actor.kind === 'SYSTEM' || actor.kind === 'PUBLIC') return NO_RELATIONS;
     const { rows: roles } = await q.query<{ role: WalletRoleName }>(
       'SELECT role FROM wallet_role WHERE wallet_id = $1 AND person_id = $2 AND revoked_at IS NULL',
       [subject.walletId, actor.personId],

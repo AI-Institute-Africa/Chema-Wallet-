@@ -9,10 +9,12 @@ import {
   NotFoundError,
   sha256Hex,
   ValidationError,
+  type Actor,
   type Command,
+  type CommandTx,
   type FlagService,
 } from '@chema/core';
-import { bootstrapWalletAccounts, ensureSystemAccount, type PendingSource } from '@chema/ledger';
+import { bootstrapWalletAccounts, ensureGroupAccount, ensureSystemAccount, type PendingSource } from '@chema/ledger';
 import type { NextAction, ProviderStatus } from '@chema/providers';
 import { isCurrency, parseMinor, type Money, type Queryable } from '@chema/shared';
 import { applyConfirmation, applyFailure } from './confirm';
@@ -51,6 +53,8 @@ export interface InitiateInput {
   amount: Money;
   idempotencyKey: string;
   payerMsisdn?: string;
+  /** Credit a GROUP sub-ledger instead of COMMUNITY (feature.group_contributions). */
+  groupId?: string;
 }
 
 export interface InitiateResult {
@@ -83,6 +87,85 @@ function needsSubmission(p: PaymentRow): boolean {
   return p.state === 'INITIATED' && p.provider_ref === null && p.failure_reason === null;
 }
 
+/**
+ * Create (or replay) a payment inside the CALLER'S command transaction. The
+ * caller's command has already been authorised and audited by the bus; this is
+ * how a contribution (P05) creates its payment atomically with itself. It never
+ * calls the provider: submit afterwards with PaymentService.submit.
+ */
+export async function createPayment(tx: CommandTx, deps: PaymentDeps, actor: Actor, input: InitiateInput): Promise<InitiateResult> {
+  const now = deps.clock();
+  if (!isUuid(input.walletId)) throw new NotFoundError('wallet', String(input.walletId));
+  if (!KEY_RE.test(input.idempotencyKey)) throw new ValidationError('bad idempotency key');
+  if (typeof input.amount.minor !== 'bigint' || input.amount.minor <= 0n || !isCurrency(input.amount.ccy)) {
+    throw new ValidationError('bad amount');
+  }
+  if (input.payerMsisdn !== undefined && !MSISDN_RE.test(input.payerMsisdn)) throw new ValidationError('bad msisdn');
+  if (input.groupId !== undefined && !isUuid(input.groupId)) throw new ValidationError('bad group');
+
+  const requestHash = sha256Hex(
+    canonicalJson({
+      walletId: input.walletId,
+      rail: input.rail,
+      minor: input.amount.minor,
+      ccy: input.amount.ccy,
+      payer: actor.personId,
+      msisdn: input.payerMsisdn ?? null,
+      ...(input.groupId ? { group: input.groupId } : {}),
+    }),
+  );
+  const { rows: prior } = await tx.query<{ id: string; request_hash: string }>(
+    'SELECT id, request_hash FROM payment WHERE idempotency_key = $1',
+    [input.idempotencyKey],
+  );
+  if (prior[0]) {
+    if (prior[0].request_hash !== requestHash) throw new ConflictError('IDEMPOTENCY_KEY_REUSED');
+    const p = await loadPayment(tx, prior[0].id);
+    if (!p) throw new NotFoundError('payment', prior[0].id);
+    return { payment: toView(p), replayed: true, needsSubmission: needsSubmission(p) };
+  }
+
+  if (!(await deps.flags.getIn(tx, 'contributions.enabled'))) throw new ForbiddenError('CONTRIBUTIONS_DISABLED');
+  // A disabled rail does not exist for callers.
+  if (!(await deps.rails.collectable(tx, input.rail))) throw new NotFoundError('rail', input.rail);
+  if (!(await deps.gate.canAccept(tx, input.walletId))) throw new ForbiddenError('WALLET_NOT_ACCEPTING_CONTRIBUTIONS');
+
+  const quote = await quoteFees(tx, deps.flags, input.rail, input.amount, now);
+  const { community } = await bootstrapWalletAccounts(tx, input.walletId, input.amount.ccy);
+  // Group money is its own sub-ledger (docs/06 Group contribution), never COMMUNITY.
+  const creditAccount = input.groupId ? await ensureGroupAccount(tx, input.walletId, input.groupId, input.amount.ccy) : community;
+  await ensureSystemAccount(tx, 'PROVIDER_CLEARING', input.amount.ccy, input.rail);
+
+  const { rows } = await tx.query<{ id: string }>(
+    `INSERT INTO payment (wallet_id, credit_account_id, rail, idempotency_key, request_hash, payer_person_id, currency,
+                          gross_minor, fee_minor, fee_payer, net_minor, fx_rate, settlement_currency, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6::uuid, $7, $8::bigint, $9::bigint, $10, $11::bigint, $12, $13, $14, $14)
+     RETURNING id`,
+    [
+      input.walletId,
+      creditAccount.id,
+      input.rail,
+      input.idempotencyKey,
+      requestHash,
+      actor.kind === 'CUSTOMER' ? actor.personId : null,
+      input.amount.ccy,
+      quote.gross.minor.toString(),
+      quote.fee.minor.toString(),
+      quote.feePayer,
+      quote.net.minor.toString(),
+      quote.fxRate,
+      quote.settlementCurrency,
+      now.toISOString(),
+    ],
+  );
+  const id = rows[0]?.id;
+  if (!id) throw new Error('payment not written');
+  await logState(tx, { id, from: null, to: 'INITIATED', source: 'INITIATE' }, now);
+  const p = await loadPayment(tx, id);
+  if (!p) throw new Error('payment vanished');
+  return { payment: toView(p), replayed: false, needsSubmission: true };
+}
+
 export function collectCommands(deps: PaymentDeps) {
   const initiate: Command<InitiateInput, InitiateResult> = {
     name: 'payment.initiate',
@@ -91,74 +174,10 @@ export function collectCommands(deps: PaymentDeps) {
       return { action: 'payment.initiate', subject: { type: 'wallet', id: input.walletId, walletId: input.walletId } };
     },
     async run(tx, input, ctx) {
-      const now = deps.clock();
-      if (!KEY_RE.test(input.idempotencyKey)) throw new ValidationError('bad idempotency key');
-      if (typeof input.amount.minor !== 'bigint' || input.amount.minor <= 0n || !isCurrency(input.amount.ccy)) {
-        throw new ValidationError('bad amount');
-      }
-      if (input.payerMsisdn !== undefined && !MSISDN_RE.test(input.payerMsisdn)) throw new ValidationError('bad msisdn');
-
-      const requestHash = sha256Hex(
-        canonicalJson({
-          walletId: input.walletId,
-          rail: input.rail,
-          minor: input.amount.minor,
-          ccy: input.amount.ccy,
-          payer: ctx.actor.personId,
-          msisdn: input.payerMsisdn ?? null,
-        }),
-      );
-      const { rows: prior } = await tx.query<{ id: string; request_hash: string }>(
-        'SELECT id, request_hash FROM payment WHERE idempotency_key = $1',
-        [input.idempotencyKey],
-      );
-      if (prior[0]) {
-        if (prior[0].request_hash !== requestHash) throw new ConflictError('IDEMPOTENCY_KEY_REUSED');
-        const p = await loadPayment(tx, prior[0].id);
-        if (!p) throw new NotFoundError('payment', prior[0].id);
-        return { result: { payment: toView(p), replayed: true, needsSubmission: needsSubmission(p) }, audit: { subjectId: p.id, reasonCode: 'REPLAY' } };
-      }
-
-      if (!(await deps.flags.getIn(tx, 'contributions.enabled'))) throw new ForbiddenError('CONTRIBUTIONS_DISABLED');
-      // A disabled rail does not exist for callers.
-      if (!(await deps.rails.collectable(tx, input.rail))) throw new NotFoundError('rail', input.rail);
-      if (!(await deps.gate.canAccept(tx, input.walletId))) throw new ForbiddenError('WALLET_NOT_ACCEPTING_CONTRIBUTIONS');
-
-      const quote = await quoteFees(tx, deps.flags, input.rail, input.amount, now);
-      const { community } = await bootstrapWalletAccounts(tx, input.walletId, input.amount.ccy);
-      await ensureSystemAccount(tx, 'PROVIDER_CLEARING', input.amount.ccy, input.rail);
-
-      const { rows } = await tx.query<{ id: string }>(
-        `INSERT INTO payment (wallet_id, credit_account_id, rail, idempotency_key, request_hash, payer_person_id, currency,
-                              gross_minor, fee_minor, fee_payer, net_minor, fx_rate, settlement_currency, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6::uuid, $7, $8::bigint, $9::bigint, $10, $11::bigint, $12, $13, $14, $14)
-         RETURNING id`,
-        [
-          input.walletId,
-          community.id,
-          input.rail,
-          input.idempotencyKey,
-          requestHash,
-          ctx.actor.kind === 'CUSTOMER' ? ctx.actor.personId : null,
-          input.amount.ccy,
-          quote.gross.minor.toString(),
-          quote.fee.minor.toString(),
-          quote.feePayer,
-          quote.net.minor.toString(),
-          quote.fxRate,
-          quote.settlementCurrency,
-          now.toISOString(),
-        ],
-      );
-      const id = rows[0]?.id;
-      if (!id) throw new Error('payment not written');
-      await logState(tx, { id, from: null, to: 'INITIATED', source: 'INITIATE' }, now);
-      const p = await loadPayment(tx, id);
-      if (!p) throw new Error('payment vanished');
-      return {
-        result: { payment: toView(p), replayed: false, needsSubmission: true },
-        audit: { subjectId: id, txnRef: `payment:${id}`, after: { state: 'INITIATED', rail: input.rail } },
-      };
+      const r = await createPayment(tx, deps, ctx.actor, input);
+      return r.replayed
+        ? { result: r, audit: { subjectId: r.payment.id, reasonCode: 'REPLAY' } }
+        : { result: r, audit: { subjectId: r.payment.id, txnRef: `payment:${r.payment.id}`, after: { state: 'INITIATED', rail: input.rail } } };
     },
   };
 

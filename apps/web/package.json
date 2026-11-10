@@ -3,11 +3,12 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Public PWA (Next.js): wallet draft, evidence upload, status (P04); public page + contribute in P05",
+  "description": "Public PWA (Next.js): wallet draft, evidence upload, status (P04); public page, contribute, receipt, privacy (P05)",
   "exports": {
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@chema/shared": "workspace:*",
     "next": "^16.4.6",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
