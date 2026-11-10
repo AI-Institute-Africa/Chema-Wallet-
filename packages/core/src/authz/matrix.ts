@@ -62,6 +62,13 @@ export const ACTIONS = [
   'document.delete',
   'document.scan_result',
   'retention.hold',
+  'payment.initiate',
+  'payment.view',
+  'payment.process',
+  'payment.refund',
+  'payment.refund.approve',
+  'recon.run',
+  'recon.exception.view',
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -130,6 +137,17 @@ export const MATRIX: Readonly<Record<Action, Cells>> = {
   'document.delete': { fidelity_admin: 'allow' },
   'document.scan_result': { system: 'allow' },
   'retention.hold': { fidelity_admin: 'allow' },
+  // P03 payments (docs/04). Contributors pay into a wallet the ContributionGate
+  // accepts (verified wallets, P04/P05). Provider callbacks, polling and the
+  // credit run as SYSTEM only.
+  'payment.initiate': { contributor: 'allow' },
+  'payment.view': { contributor: 'own', opsfin: 'allow', auditor: 'allow' },
+  'payment.process': { system: 'allow' },
+  // refund.policy unset ⇒ every refund is a manual, dual-approved case (D11).
+  'payment.refund': { opsfin: 'maker' },
+  'payment.refund.approve': { opsfin: 'checker' },
+  'recon.run': { opsfin: 'allow', system: 'allow' },
+  'recon.exception.view': { opsfin: 'allow', auditor: 'allow' },
 };
 
 /** Actions that need a fresh step-up grant (docs/02 Step-up). */
@@ -146,4 +164,5 @@ export const CHECKER_ACTION: Readonly<Partial<Record<Action, Action>>> = {
   'wallet.replace_admin': 'wallet.replace_admin.approve',
   'ledger.adjust': 'ledger.adjust.approve',
   'config.change': 'config.change.approve',
+  'payment.refund': 'payment.refund.approve',
 };

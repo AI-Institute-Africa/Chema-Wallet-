@@ -1,6 +1,7 @@
 import { createCoreServices, LocalFsBlobStore, loadSecrets, MockMalwareScanner, MockOtpProvider, type CoreServices } from '@chema/core';
 import { createPgClient } from '@chema/shared';
 import { buildApp } from './app';
+import { buildPayments, type PaymentsWiring } from './payments';
 
 const port = Number(process.env['PORT'] ?? 7600);
 const host = process.env['HOST'] ?? '0.0.0.0';
@@ -25,9 +26,27 @@ if (db) {
   }
 }
 
-const app = buildApp({ ...(db ? { db } : {}), ...(core ? { core } : {}), version: process.env['APP_VERSION'] ?? '0.0.0' });
+let payments: PaymentsWiring | undefined;
+if (core) {
+  try {
+    payments = await buildPayments(core);
+  } catch (err) {
+    startupWarning = err instanceof Error ? err.message : 'payments unavailable';
+  }
+}
+
+const app = buildApp({
+  ...(db ? { db } : {}),
+  ...(core ? { core } : {}),
+  ...(payments ? { payments: payments.service } : {}),
+  version: process.env['APP_VERSION'] ?? '0.0.0',
+});
 if (startupWarning) app.log.warn({ reason: startupWarning }, 'core services disabled: only health routes are served');
 if (core) app.log.warn('OTP delivery and malware scanning are MOCKS (no real provider configured)');
+if (payments) {
+  app.log.warn('payment rails are MOCKS; the contribution gate refuses every wallet until verification lands (P04/P05)');
+  if (payments.ephemeralWebhookSecret) app.log.warn('CHEMA_MOCK_WEBHOOK_SECRET unset: mock webhook secret is per-process');
+}
 
 async function shutdown(signal: string): Promise<void> {
   app.log.info({ signal }, 'shutting down');

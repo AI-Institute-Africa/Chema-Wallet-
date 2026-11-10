@@ -26,8 +26,12 @@ export interface Harness extends CoreServices {
 
 let phoneSeq = 1_000_000;
 
-export async function createHarness(env: Record<string, string | undefined> = {}): Promise<Harness> {
-  const db = await migratedTestDb();
+export async function createHarness(
+  env: Record<string, string | undefined> = {},
+  opts: { db?: SqlClient } = {},
+): Promise<Harness> {
+  // A caller-supplied db (e.g. realPgTestDb for concurrency tests) is closed by close() too.
+  const db = opts.db ?? (await migratedTestDb());
   let current = new Date('2026-11-10T08:00:00.000Z');
   const clock = () => new Date(current.getTime());
   const otp = new MockOtpProvider();

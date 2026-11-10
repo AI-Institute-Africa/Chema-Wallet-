@@ -40,6 +40,15 @@ importers:
       '@chema/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@chema/ledger':
+        specifier: workspace:*
+        version: link:../../packages/ledger
+      '@chema/payments':
+        specifier: workspace:*
+        version: link:../../packages/payments
+      '@chema/providers':
+        specifier: workspace:*
+        version: link:../../packages/providers
       '@chema/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -84,7 +93,26 @@ importers:
         specifier: ^4.10.2
         version: 4.10.2
 
-  packages/providers: {}
+  packages/payments:
+    dependencies:
+      '@chema/core':
+        specifier: workspace:*
+        version: link:../core
+      '@chema/ledger':
+        specifier: workspace:*
+        version: link:../ledger
+      '@chema/providers':
+        specifier: workspace:*
+        version: link:../providers
+      '@chema/shared':
+        specifier: workspace:*
+        version: link:../shared
+
+  packages/providers:
+    dependencies:
+      '@chema/shared':
+        specifier: workspace:*
+        version: link:../shared
 
   packages/shared:
     dependencies:

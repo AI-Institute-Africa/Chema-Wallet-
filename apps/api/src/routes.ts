@@ -18,6 +18,8 @@ import {
   type Actor,
   type CoreServices,
 } from '@chema/core';
+import { InsufficientFundsError, LedgerError } from '@chema/ledger';
+import { WebhookRejectedError } from '@chema/providers';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 
@@ -61,6 +63,10 @@ export function registerRoutes(app: FastifyInstance, core: CoreServices): void {
     if (err instanceof NotFoundError) return reply.code(404).send({ error: 'not_found' });
     if (err instanceof ConflictError) return reply.code(409).send({ error: err.reason.toLowerCase() });
     if (err instanceof RateLimitedError) return reply.code(429).send({ error: 'rate_limited' });
+    // Forged / stale provider callback: nothing was stored.
+    if (err instanceof WebhookRejectedError) return reply.code(401).send({ error: 'webhook_rejected' });
+    if (err instanceof InsufficientFundsError) return reply.code(409).send({ error: 'insufficient_funds' });
+    if (err instanceof LedgerError) return reply.code(409).send({ error: 'ledger_rejected' });
     const status = (err as { statusCode?: number }).statusCode;
     if (status && status >= 400 && status < 500) return reply.code(status).send({ error: 'invalid_request' });
     req.log.error({ err }, 'unhandled error');

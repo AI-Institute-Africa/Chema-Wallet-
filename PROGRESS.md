@@ -6,7 +6,7 @@
 | P00 bootstrap | done | 2026-11-10 |
 | P01 identity/audit/consent | done | 2026-11-10 |
 | P02 ledger | done | 2026-11-10 |
-| P03 payments | todo | |
+| P03 payments | done | 2026-11-10 |
 | P04 wallet + verification | todo | |
 | P05 public page + contribute | todo | |
 | P06 Fidelity claims link | todo | |
@@ -38,6 +38,15 @@
 - 2026-11-10 — P02: a PAYOUT journal must consume exactly one active reservation of the same account + amount (checked in TS and by trigger). `paid` = net debits of PAYOUT journals, so reversing a payout lowers it.
 - 2026-11-10 — P02: a reversal may spend the money held by TXN holds on the journal it reverses (that is what the hold protects), and a TXN hold on a reversed journal stops counting toward `held`. Found in self-review; tests fail without it.
 - 2026-11-10 — P02: real-Postgres concurrency suite runs when `CHEMA_TEST_DATABASE_URL` is set (CI has a postgres:16 service). PGlite has one connection, so PGlite-only runs CANNOT catch races: removing the app lock + DB guard gave 18 reservations of 100 against a 1 000 balance on real PG and passed on PGlite.
+- 2026-11-10 — P03: new package `@chema/payments` (core + ledger + providers). It cannot live in core (ledger depends on core ⇒ cycle); `@chema/providers` holds adapters only and depends on shared alone.
+- 2026-11-10 — P03: provider calls never run inside a DB transaction. Sequence = command (tx) → provider call → command (tx): initiate → `collect()` → `payment.record_submission`; webhook verify → `payment.receive_event` (raw store + outbox) → worker `payment.process_event`; `queryStatus()` → `payment.poll`; refund execute → `refund()` → `payment.refund_submission`; `settlementReport()` → `recon.run`.
+- 2026-11-10 — P03: the credit happens in ONE function, `applyConfirmation` (`packages/payments/src/confirm.ts`), enforced three ways: payment row `FOR UPDATE` + must be open; ledger key `payment:<id>:credit`; `payment_guard` trigger lets `credit_journal_id` be set once, only with SUCCEEDED, only to that payment's CONTRIBUTION journal. A test greps the repo: no other non-test file posts `kind: 'CONTRIBUTION'`.
+- 2026-11-10 — P03: replay cache = `UNIQUE (rail, provider_event_id)` on append-only `provider_event` (durable) + ±5 min signed-timestamp window; one `provider_event_outcome` row per event, processed under a row lock ⇒ a redelivery is a no-op.
+- 2026-11-10 — P03: FAILED/EXPIRED are final. A late success for them is never credited; it surfaces as UNMATCHED_INCOMING in recon (suspense + exception). Collect timeouts and unexpected errors ⇒ PENDING_UNKNOWN, never FAILED.
+- 2026-11-10 — P03: refund = maker-checker (`payment.refund` / `payment.refund.approve`, opsfin, maker ≠ checker). Executing debits the wallet into REFUND_CLEARING at once (unspendable); provider confirmation moves REFUND_CLEARING → PROVIDER_CLEARING and completes it; provider refusal reverses the debit.
+- 2026-11-10 — P03: chargeback = DISPUTE_OPENED places a TXN hold for the disputed amount on that payment's credit only + CHARGEBACK case; CHARGEBACK releases it and debits min(amount, available, not-yet-compensated) to REFUND_CLEARING; any shortfall is parked in SUSPENSE_UNMATCHED + CHARGEBACK_SHORTFALL exception. Never negative; no loss-bearer chosen (human ADJUSTMENT later).
+- 2026-11-10 — P03: recon differences within tolerance post to new system account `SYS:RECON_DIFF` (migration 0010 widens the kind CHECK); short settlement beyond tolerance = TXN hold for the shortfall on that payment only; over-settlement and unmatched rows go to SUSPENSE_UNMATCHED. Re-running a day is idempotent.
+- 2026-11-10 — P03: rail flags gate NEW money only (initiate, rail list, webhook intake ⇒ 404 when off). Polling and recon still use the adapter for payments already in flight, so switching a rail off cannot strand moving money.
 
 ## Assumptions (not in spec; safest default taken)
 - Flag precedence: env `CHEMA_FLAG_<KEY>` > `config_flag` row > registry default. Env can enable financial flags (needed for mock rails in dev/test); DB writes cannot.
@@ -68,6 +77,17 @@
 - P02 journal kinds (`CONTRIBUTION BENEFIT PAYOUT REFUND CHARGEBACK FEE SETTLEMENT SUSPENSE ADJUSTMENT`) are a guess from the account list; extend by migration. ADJUSTMENT and reversals require a reason.
 - P02 rails are not hard-coded: a clearing-account qualifier is any `^[A-Z][A-Z0-9_]{1,31}$` code.
 - P02 multi-currency: one account per (sub-ledger, currency); journals balance per currency; no FX inside the ledger.
+- P03 contribution gate: production `DENY_ALL_GATE` — no wallet table yet, so `POST /payments` is 403 for every wallet until P04/P05 swap in the verification check (`ContributionGate.canAccept`).
+- P03 only COMMUNITY contributions; group contributions (`feature.group_contributions`) are P05.
+- P03 fee semantics: amount = what the contributor gives; fee payer CONTRIBUTOR ⇒ gross = amount + fee; WALLET ⇒ net = amount − fee. Fee = fixed + amount × bps / 10 000 (integer floor). Credited to `SYS:FEES`. The disclosed fee is compared with the provider-reported fee ⇒ FEE_VARIANCE on mismatch.
+- P03 FX: no rate source exists ⇒ payment currency = settlement currency, `fx_rate` null, cross-currency confirmations not credited (CURRENCY_MISMATCH exception).
+- P03 confirmation ≠ request: credit min(confirmed, requested); excess ⇒ SUSPENSE + AMOUNT_VARIANCE; short ⇒ credit confirmed + AMOUNT_VARIANCE. Fee scales pro rata on a short credit.
+- P03 polling: 1 min doubling, capped 6 h, window 72 h from initiation; after the window the payment stays PENDING_UNKNOWN (never assumed failed) + POLL_WINDOW_EXPIRED exception.
+- P03 exception SLA (D09 unresolved): HIGH 24 h, MEDIUM 72 h, LOW 168 h; owner = `OPS_FINANCE` role queue (hold `owner_id` holds the same label); settlement lag 1 day before MISSING_SETTLEMENT. Code constants in `exceptions.ts` / `recon.ts`; P09 makes them config.
+- P03 refund provider timeout: refund stays open with money in REFUND_CLEARING (not spendable, not lost) until a callback or an operator settles it; no auto-retry.
+- P03 provider events that arrive before the state they need (e.g. DISPUTE_OPENED before the payment is credited) are recorded with outcome `NOT_CREDITED` and not retried.
+- P03 mock webhook wire format + HMAC-SHA256 over `${ts}.${body}` (headers `x-chema-signature: v1=…`, `x-chema-timestamp`) is ours; each real adapter implements its provider's scheme. `CHEMA_MOCK_WEBHOOK_SECRET` (≥16 chars) or a per-process random secret.
+- P03 `recon_exception.escalation_level` exists but nothing escalates yet (P09); the column is not in the set-once list, so P09 adds a migration to move it.
 
 ## Gotchas / handoff to next phase
 - New state change = a `Command {name, resolve, run}` run through `core.bus.execute`. Add its action to `ACTIONS` + `MATRIX` (`packages/core/src/authz/matrix.ts`) AND to the independent `EXPECTED` table in `matrix.test.ts` (the test fails if either is missing). Step-up actions: `STEP_UP_ACTIONS`; maker→checker pairs: `CHECKER_ACTION`.
@@ -85,6 +105,11 @@
 - P07/P09: wrap `reserve/release/placeHold/releaseHold/reverse` and ADJUSTMENT posts in bus commands (matrix actions + maker-checker for `ledger.adjust`, hold release). The ledger checks books, not people.
 - Ledger tests: `@chema/ledger/testing` (`inTx`, `seedSystem`, `seedWallet`, `creditWallet`). `inTx` bypasses the bus — tests only. Model-based property suite: `ledger.property.test.ts` (fast-check, 100 runs × ≤40 ops). For real concurrency: `docker compose up -d postgres` then `CHEMA_TEST_DATABASE_URL=postgres://chema:change-me@localhost:55432/chema pnpm vitest run packages/ledger`; `realPgTestDb()` in `@chema/shared/testing` creates + drops a throwaway database.
 - Ledger SQL: never `UPDATE`/`DELETE` ledger rows; corrections are `reverse()` or a new journal. Insert all entries of a journal in one statement or the seal trigger rejects them.
-- New migrations: `db/migrations/NNNN_snake.sql`, contiguous numbers (next = 0009); never edit an applied file (checksum fails hard). `.gitattributes` forces LF.
+- New migrations: `db/migrations/NNNN_snake.sql`, contiguous numbers (next = 0011); never edit an applied file (checksum fails hard). `.gitattributes` forces LF.
 - Vitest capped at 2 workers (RAM). pino `formatters.log` runs before serializers: never deep-walk class instances there.
 - Ports: api 7600, postgres 55432, redis 56379.
+- Payments (P03): channels call `PaymentService` (`@chema/payments`) only: `listRails`, `initiate`, `view`, `receipt`, `receiveWebhook`, `processEvent` (worker), `pollDue` (worker loop), `requestRefund`, `runRecon`, `listExceptions`, `balances` (fills `pending`). Tests: `createPaymentsHarness(flags, {db?})` from `@chema/payments/testing` (mock rails on the harness clock, `t.newWallet()` opens the gate, `t.deliver(rail)` = webhook + worker).
+- P04/P05 must: replace `DENY_ALL_GATE` in `apps/api/src/payments.ts` with a gate that accepts only verified, published wallets; add FKs to `wallet(id)` on `payment.wallet_id`, `case_record.wallet_id`, `receipt.wallet_id`, `recon_exception.wallet_id`.
+- P07 owns: dispute/case workflow on `case_record` (stub), exception resolution + hold release with maker-checker, refunds of partly spent wallets (D11), payouts via `adapter.payout` (interface only so far).
+- Mock rails (`@chema/providers`): `MockRail.scenario` switches + driver methods `succeed/fail/expire/openDispute/chargeback/winDispute/addSettlementRow/takeWebhooks`. Callbacks are signed when due, so advancing the clock past the window makes queued ones stale.
+- Next migration = 0011.

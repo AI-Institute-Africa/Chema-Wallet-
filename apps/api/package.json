@@ -13,6 +13,9 @@
   },
   "dependencies": {
     "@chema/core": "workspace:*",
+    "@chema/ledger": "workspace:*",
+    "@chema/payments": "workspace:*",
+    "@chema/providers": "workspace:*",
     "@chema/shared": "workspace:*",
     "fastify": "^5.12.8",
     "zod": "^4.6.7"
