@@ -1,0 +1,8 @@
+{
+  "name": "@chema/providers",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Payment provider adapters (P03)",
+  "exports": { ".": "./src/index.ts" }
+}

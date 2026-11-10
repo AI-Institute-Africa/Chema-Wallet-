@@ -1,0 +1,19 @@
+{
+  "name": "@chema/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Money, db, migrations, logging, i18n",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "dependencies": {
+    "pg": "^8.23.1",
+    "pino": "^10.4.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.16",
+    "@types/pg": "^8.23.1"
+  }
+}

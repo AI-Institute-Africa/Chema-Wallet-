@@ -1,0 +1,8 @@
+{
+  "name": "@chema/channels",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Channel providers: WhatsApp, SMS (P08)",
+  "exports": { ".": "./src/index.ts" }
+}

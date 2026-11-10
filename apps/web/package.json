@@ -1,0 +1,8 @@
+{
+  "name": "@chema/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Public PWA (Next.js arrives P04/P05)",
+  "exports": { ".": "./src/index.ts" }
+}

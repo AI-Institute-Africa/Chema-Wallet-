@@ -1,0 +1,4 @@
+# LF everywhere: migration checksums must match across Windows and Linux.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
