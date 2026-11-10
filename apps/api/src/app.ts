@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { CoreServices } from '@chema/core';
+import type { ContributionService } from '@chema/contributions';
 import type { PaymentService } from '@chema/payments';
 import { createLogger, type SqlClient } from '@chema/shared';
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
+import { registerContributionRoutes } from './contribution-routes';
 import { registerCors } from './cors';
 import { registerPaymentRoutes } from './payment-routes';
 import { registerRoutes } from './routes';
@@ -19,6 +21,8 @@ export interface AppOptions {
   payments?: PaymentService;
   /** Wallet lifecycle + verification (P04); needs core. */
   wallets?: WalletWiring;
+  /** Public page + contributions (P05); needs core + payments. */
+  contributions?: ContributionService;
   /** Browser origins allowed to call the API (the web app). Empty ⇒ no CORS headers. */
   corsOrigins?: readonly string[];
 }
@@ -62,7 +66,11 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   if (opts.core) {
     registerRoutes(app, opts.core);
     if (opts.payments) registerPaymentRoutes(app, opts.core, opts.payments);
-    if (opts.wallets) registerWalletRoutes(app, opts.core, opts.wallets);
+    const contributions = opts.payments ? opts.contributions : undefined;
+    if (opts.wallets) {
+      registerWalletRoutes(app, opts.core, contributions ? { ...opts.wallets, publicPage: (slug) => contributions.page(slug) } : opts.wallets);
+    }
+    if (contributions) registerContributionRoutes(app, opts.core, contributions);
   }
 
   return app;

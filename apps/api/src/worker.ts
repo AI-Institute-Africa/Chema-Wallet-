@@ -11,8 +11,11 @@ import {
 } from '@chema/core';
 import { BullMqJobQueue, createOutboxWorker } from '@chema/core/bullmq';
 import { createLogger, createPgClient } from '@chema/shared';
+import { CONTRIBUTION_TOPICS } from '@chema/contributions';
+import { NOTIFICATION_TOPIC } from '@chema/channels';
 import { WALLET_TOPICS } from '@chema/wallet';
 import { z } from 'zod';
+import { buildContributions } from './contributions';
 import { buildPayments } from './payments';
 
 const log = createLogger(process.env['LOG_LEVEL'] ?? 'info');
@@ -25,15 +28,22 @@ if (!databaseUrl || !redisUrl) {
 
 const db = createPgClient(databaseUrl, 4, (err) => log.warn({ err }, 'idle database connection lost'));
 const blobs = new LocalFsBlobStore(process.env['CHEMA_BLOB_DIR'] ?? '.data/blobs');
-const core = createCoreServices({ db, secrets: loadSecrets(), otp: new MockOtpProvider(), blobs, scanner: new MockMalwareScanner() });
+const secrets = loadSecrets();
+const core = createCoreServices({ db, secrets, otp: new MockOtpProvider(), blobs, scanner: new MockMalwareScanner() });
 const queue = new BullMqJobQueue(redisUrl);
 const relay = new OutboxRelay(db, queue);
 
 const payments = await buildPayments(core);
+const contributions = buildContributions(core, payments.service, {
+  secrets,
+  publicBaseUrl: process.env['CHEMA_PUBLIC_BASE_URL'] ?? 'http://localhost:3000',
+});
 
 const DocPayload = z.object({ documentId: z.uuid() });
 const EventPayload = z.object({ eventRowId: z.uuid() });
 const ReceiptPayload = z.object({ receiptId: z.uuid() });
+const PaymentFinalPayload = z.object({ paymentId: z.uuid() }).loose();
+const NotificationPayload = z.object({ notificationId: z.uuid() });
 const PurgePayload = z.object({ documentId: z.uuid(), storageRef: z.string() });
 const WalletEventPayload = z.object({ walletId: z.uuid() }).loose();
 
@@ -41,11 +51,11 @@ const WalletEventPayload = z.object({ walletId: z.uuid() }).loose();
 // D16 + P08/P09; until then each event is acknowledged and logged (ids only).
 // A delivery failure never touches wallet state.
 const walletHandlers = Object.fromEntries(
-  WALLET_TOPICS.map((topic) => [
+  [...WALLET_TOPICS, ...CONTRIBUTION_TOPICS].map((topic) => [
     topic,
     async (payload: unknown) => {
       const { walletId } = WalletEventPayload.parse(payload);
-      log.info({ topic, walletId }, 'wallet event (mock notification channel)');
+      log.info({ topic, walletId }, 'wallet/contribution event (logged; notifications go through notification.send)');
     },
   ]),
 );
@@ -65,11 +75,22 @@ const outboxWorker = createOutboxWorker(redisUrl, {
     const { eventRowId } = EventPayload.parse(payload);
     await payments.service.processEvent(eventRowId);
   },
-  // Receipt notification. Real SMS/WhatsApp delivery is D16; a failure here
-  // retries the job and never touches the payment or the receipt.
+  // Rows written before P05 used this topic; contribution.settle now owns receipts.
   'receipt.notify': async (payload) => {
     const { receiptId } = ReceiptPayload.parse(payload);
-    log.info({ receiptId }, 'receipt notification (mock channel)');
+    log.info({ receiptId }, 'legacy receipt.notify ignored');
+  },
+  // Final payment state ⇒ contribution settle: receipt issue, tribute, family notice, target (idempotent).
+  'payment.succeeded': async (payload) => {
+    await contributions.service.settle(PaymentFinalPayload.parse(payload).paymentId);
+  },
+  'payment.failed': async (payload) => {
+    await contributions.service.settle(PaymentFinalPayload.parse(payload).paymentId);
+  },
+  // One delivery attempt; failures are recorded on the notification and retried by notifyLoop.
+  [NOTIFICATION_TOPIC]: async (payload) => {
+    const n = await contributions.notifications.deliver(NotificationPayload.parse(payload).notificationId);
+    log.info({ notificationId: n.id, status: n.status, attempts: n.attempts }, 'notification');
   },
 });
 outboxWorker.worker.on('failed', (job, err) => log.warn({ jobId: job?.id, topic: job?.name, err }, 'outbox job failed'));
@@ -98,6 +119,19 @@ async function pollLoop(): Promise<void> {
       log.error({ err }, 'payment poll error');
     }
     await new Promise((r) => setTimeout(r, 30_000));
+  }
+}
+
+/** Notification retries (backoff per notification, see NOTIFY_RETRY). */
+async function notifyLoop(): Promise<void> {
+  while (!stopping) {
+    try {
+      const { attempted } = await contributions.notifications.deliverDue();
+      if (attempted) log.info({ attempted }, 'notification retries');
+    } catch (err) {
+      log.error({ err }, 'notification retry error');
+    }
+    await new Promise((r) => setTimeout(r, 60_000));
   }
 }
 
@@ -131,4 +165,5 @@ process.on('SIGINT', () => void shutdown('SIGINT'));
 log.info('outbox worker started');
 void relayLoop();
 void pollLoop();
+void notifyLoop();
 void reconLoop();

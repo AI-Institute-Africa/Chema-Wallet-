@@ -3,6 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Channel providers: WhatsApp, SMS (P08)",
-  "exports": { ".": "./src/index.ts" }
+  "description": "Delivery channels: notification service (P05: web/email/SMS mocks); WhatsApp (P08)",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@chema/core": "workspace:*",
+    "@chema/shared": "workspace:*"
+  }
 }

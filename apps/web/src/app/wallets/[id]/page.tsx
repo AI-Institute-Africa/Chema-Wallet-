@@ -92,6 +92,9 @@ export default function WalletStatus() {
           <p className="muted">Link: {w.share.copy}</p>
           {/* Plain SVG served by our API; next/image adds nothing here. */}
           <img className="qr" alt="QR code for the wallet link" src={`${API_BASE}/public/wallets/${w.publicSlug}/qr.svg`} />
+          <p>
+            <Link href={`/w/${w.publicSlug}`}>Open the public page</Link> · <Link href={`/wallets/${w.id}/privacy`}>What the public page shows</Link>
+          </p>
         </div>
       )}
 

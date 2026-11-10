@@ -26,6 +26,13 @@ export interface WalletWiring {
   publicBaseUrl: string;
   /** HMAC key for reporter IP hashes (abuse brake without storing IPs). Random per process if unset. */
   ipHashKey?: Buffer;
+  /** P05: the full public page (privacy-filtered). Without it, the P04 minimal view is served. */
+  publicPage?: (slug: string) => Promise<unknown>;
+}
+
+/** Money and other bigints leave the API as strings. */
+function json<T>(value: T): unknown {
+  return JSON.parse(JSON.stringify(value, (_k, v: unknown) => (typeof v === 'bigint' ? v.toString() : v)));
 }
 
 const Uuid = z.uuid();
@@ -207,8 +214,9 @@ export function registerWalletRoutes(app: FastifyInstance, core: CoreServices, w
   };
 
   app.get('/public/wallets/:slug', async (req, reply) => {
-    const view = await publicWalletView(core.db, slugParam(req), wiring.publicBaseUrl);
-    return reply.header('cache-control', 'no-store').send(view);
+    const slug = slugParam(req);
+    const view = wiring.publicPage ? await wiring.publicPage(slug) : await publicWalletView(core.db, slug, wiring.publicBaseUrl);
+    return reply.header('cache-control', 'no-store').send(json(view));
   });
 
   app.get('/public/wallets/:slug/qr.svg', async (req, reply) => {

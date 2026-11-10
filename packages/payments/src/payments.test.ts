@@ -336,7 +336,7 @@ describe('§P payments (mock rails)', () => {
     await t.deliver(t.ecocash);
     // The notification is an outbox job delivered after commit; mark it failed as a dead provider would.
     const { rows: jobs } = await t.h.db.query<{ id: string; payload: { receiptId: string } }>(
-      "SELECT id, payload FROM outbox_event WHERE topic = 'receipt.notify' ORDER BY created_at DESC LIMIT 1",
+      "SELECT id, payload FROM outbox_event WHERE topic = 'payment.succeeded' ORDER BY created_at DESC LIMIT 1",
     );
     await t.h.db.query("UPDATE outbox_event SET status = 'FAILED', attempts = 20, last_error = 'sms down' WHERE id = $1", [jobs[0]!.id]);
     const after = await t.service.view(c.actor, view.id);

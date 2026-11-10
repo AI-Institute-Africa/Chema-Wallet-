@@ -186,8 +186,9 @@ export async function applyConfirmation(tx: CommandTx, ctx: ApplyCtx, p: Payment
     },
     { ...(c.eventId ? { eventId: c.eventId } : {}) },
   );
-  // Delivery runs after commit and can fail without touching the payment.
-  await enqueueOutbox(tx, 'receipt.notify', { receiptId });
+  // Receipt delivery, tribute publication and the family notice run after
+  // commit (contribution.settle) and can fail without touching the payment.
+  await enqueueOutbox(tx, 'payment.succeeded', { paymentId: p.id, receiptId });
   return 'CREDITED';
 }
 
@@ -206,6 +207,7 @@ export async function applyFailure(
     ...(eventId ? { eventId } : {}),
     detail: reason.slice(0, 200),
   });
+  await enqueueOutbox(tx, 'payment.failed', { paymentId: p.id, state: to });
   return 'APPLIED';
 }
 

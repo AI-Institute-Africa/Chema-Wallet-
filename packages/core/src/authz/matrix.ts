@@ -16,7 +16,9 @@ export type Principal =
   | 'verifier'
   | 'auditor'
   | 'fidelity_admin'
-  | 'system';
+  | 'system'
+  /** Unauthenticated visitor (PUBLIC actor). Never owns or is assigned anything. */
+  | 'public';
 
 export type Rule =
   /** Y */
@@ -78,6 +80,16 @@ export const ACTIONS = [
   'payment.refund.approve',
   'recon.run',
   'recon.exception.view',
+  'contribution.create',
+  'contribution.view_own',
+  'contribution.settle',
+  'receipt.reissue',
+  'tribute.manage_own',
+  'tribute.moderate',
+  'wallet.privacy.update',
+  'wallet.photo.set',
+  'group.create',
+  'notification.process',
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -179,6 +191,24 @@ export const MATRIX: Readonly<Record<Action, Cells>> = {
   'payment.refund.approve': { opsfin: 'checker' },
   'recon.run': { opsfin: 'allow', system: 'allow' },
   'recon.exception.view': { opsfin: 'allow', auditor: 'allow' },
+  // P05 (docs/06). Contributing needs no account: a PUBLIC visitor or any
+  // customer. What a PUBLIC actor may then do to its own contribution (view,
+  // reissue the receipt, remove its tribute) is proven by the signed link,
+  // checked in each command's guard (audited DENIED without it).
+  'contribution.create': { contributor: 'allow', public: 'allow' },
+  'contribution.view_own': { contributor: 'own', public: 'allow', opsfin: 'allow', auditor: 'allow' },
+  'contribution.settle': { system: 'allow' },
+  'receipt.reissue': { contributor: 'own', public: 'allow' },
+  'tribute.manage_own': { contributor: 'own', public: 'allow' },
+  // Human review of flagged tributes; moderation never touches money.
+  'tribute.moderate': { verifier: 'allow', fidelity_admin: 'allow' },
+  // Family privacy + photo: the wallet admin decides what the public sees.
+  'wallet.privacy.update': { admin: 'allow' },
+  'wallet.photo.set': { admin: 'allow' },
+  // Group contributions (feature.group_contributions, off): the group's
+  // authorised representative is the customer who creates it.
+  'group.create': { contributor: 'allow' },
+  'notification.process': { system: 'allow' },
 };
 
 /** Actions that need a fresh step-up grant (docs/02 Step-up). */

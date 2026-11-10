@@ -6,7 +6,8 @@
   "description": "Money, db, migrations, logging, i18n",
   "exports": {
     ".": "./src/index.ts",
-    "./testing": "./src/testing.ts"
+    "./testing": "./src/testing.ts",
+    "./i18n": "./src/i18n/index.ts"
   },
   "dependencies": {
     "pg": "^8.23.1",

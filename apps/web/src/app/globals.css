@@ -47,3 +47,17 @@ button[disabled] { opacity: 0.6; cursor: default; }
 ul.plain { list-style: none; padding: 0; margin: 0; }
 ul.plain li { padding: 8px 0; border-bottom: 1px solid var(--line); }
 .qr { max-width: 220px; }
+/* P05 public page: large text, mobile first, low bandwidth. */
+main.public { font-size: 1.125rem; }
+.big { font-size: 1.25rem; font-weight: 600; }
+.small { font-size: 0.875rem; }
+a.button.big, button.big { padding: 14px 22px; width: 100%; text-align: center; }
+button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); margin-right: 8px; }
+label.check { display: flex; gap: 8px; align-items: center; font-weight: 400; }
+label.check input { width: auto; }
+progress { width: 100%; height: 12px; accent-color: var(--accent); }
+img.photo { display: block; max-width: 100%; height: auto; border-radius: 12px; margin-bottom: 12px; }
+.receipt dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 8px 0; }
+.receipt dt { color: var(--muted); }
+.receipt dd { margin: 0; }
+@media print { button, a.button { display: none; } }

@@ -3,8 +3,8 @@
 // cookies are used (Bearer tokens), so credentials are never allowed.
 import type { FastifyInstance } from 'fastify';
 
-const ALLOW_HEADERS = 'authorization, content-type, idempotency-key, x-step-up-token, x-device-id, x-request-id';
-const ALLOW_METHODS = 'GET, POST, DELETE, OPTIONS';
+const ALLOW_HEADERS = 'authorization, content-type, idempotency-key, x-step-up-token, x-device-id, x-request-id, x-contribution-token';
+const ALLOW_METHODS = 'GET, POST, PUT, DELETE, OPTIONS';
 
 /** "https://a.example, http://localhost:3000" → normalised origins; invalid entries dropped. */
 export function parseOrigins(raw: string | undefined): string[] {

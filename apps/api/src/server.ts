@@ -1,8 +1,9 @@
-import { createCoreServices, LocalFsBlobStore, loadSecrets, MockMalwareScanner, type CoreServices } from '@chema/core';
+import { createCoreServices, LocalFsBlobStore, loadSecrets, MockMalwareScanner, type CoreServices, type Secrets } from '@chema/core';
 import { createPgClient } from '@chema/shared';
 import { buildApp } from './app';
 import { walletCommands } from '@chema/wallet';
 import { parseOrigins } from './cors';
+import { buildContributions, type ContributionsWiring } from './contributions';
 import { chooseOtpProvider } from './otp';
 import { buildPayments, type PaymentsWiring } from './payments';
 import type { WalletWiring } from './wallet-routes';
@@ -17,12 +18,14 @@ const db = databaseUrl ? createPgClient(databaseUrl, 10, (err) => reportIdleDbEr
 
 const otpChoice = chooseOtpProvider(process.env);
 let core: CoreServices | undefined;
+let secrets: Secrets | undefined;
 let startupWarning: string | undefined;
 if (db) {
   try {
+    secrets = loadSecrets();
     core = createCoreServices({
       db,
-      secrets: loadSecrets(),
+      secrets,
       // Real SMS/WhatsApp OTP delivery is decision D16 (channel.* flags); until then codes go
       // nowhere, or to CHEMA_DEV_OTP_FILE on a developer machine (refused in production).
       otp: otpChoice.provider,
@@ -53,12 +56,16 @@ if (core) {
     startupWarning = err instanceof Error ? err.message : 'payments unavailable';
   }
 }
+// P05: public page + contributions (signed links use CHEMA_AUTH_SECRET-derived keys).
+const contributions: ContributionsWiring | undefined =
+  core && payments && secrets ? buildContributions(core, payments.service, { secrets, publicBaseUrl }) : undefined;
 
 const app = buildApp({
   ...(db ? { db } : {}),
   ...(core ? { core } : {}),
   ...(payments ? { payments: payments.service } : {}),
   ...(wallets ? { wallets } : {}),
+  ...(contributions ? { contributions: contributions.service } : {}),
   // Web app origin(s) for CORS; defaults to the public web base URL.
   corsOrigins: parseOrigins(process.env['CHEMA_WEB_ORIGINS'] ?? publicBaseUrl),
   version: process.env['APP_VERSION'] ?? '0.0.0',

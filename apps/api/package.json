@@ -12,6 +12,8 @@
     "worker": "tsx src/worker.ts"
   },
   "dependencies": {
+    "@chema/channels": "workspace:*",
+    "@chema/contributions": "workspace:*",
     "@chema/core": "workspace:*",
     "@chema/ledger": "workspace:*",
     "@chema/payments": "workspace:*",

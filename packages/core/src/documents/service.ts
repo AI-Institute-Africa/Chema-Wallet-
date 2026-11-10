@@ -13,7 +13,7 @@ import type { Secrets } from '../secrets';
 import type { BlobStore, MalwareScanner } from './store';
 import { one } from '../db';
 
-export const DOCUMENT_CLASSES = ['DEATH_EVIDENCE', 'ID', 'MANDATE', 'OTHER'] as const;
+export const DOCUMENT_CLASSES = ['DEATH_EVIDENCE', 'ID', 'MANDATE', 'OTHER', 'PHOTO'] as const;
 export type DocumentClass = (typeof DOCUMENT_CLASSES)[number];
 export type RetentionClass = 'SENSITIVE' | 'FINANCIAL' | 'PUBLIC_CONTENT';
 
@@ -22,13 +22,17 @@ export const DOCUMENT_LIMITS = {
   contentTypes: ['application/pdf', 'image/jpeg', 'image/png'] as readonly string[],
 };
 
-/** Every evidence class is sensitive; public photos get their own path in P05. */
+/** Every evidence class is sensitive. A memorial PHOTO is public content (P05), shown only with consent. */
 const RETENTION: Readonly<Record<DocumentClass, RetentionClass>> = {
   DEATH_EVIDENCE: 'SENSITIVE',
   ID: 'SENSITIVE',
   MANDATE: 'SENSITIVE',
   OTHER: 'SENSITIVE',
+  PHOTO: 'PUBLIC_CONTENT',
 };
+
+/** A public photo is an image; never a PDF. */
+export const PHOTO_CONTENT_TYPES: readonly string[] = ['image/jpeg', 'image/png'];
 
 export function retentionClassFor(cls: DocumentClass): RetentionClass {
   return RETENTION[cls];
@@ -103,6 +107,7 @@ export function documentCommands(deps: { blobs: BlobStore; scanner: MalwareScann
     async resolve(_q, input, actor) {
       if (!(DOCUMENT_CLASSES as readonly string[]).includes(input.class)) throw new ValidationError('unknown document class');
       if (!DOCUMENT_LIMITS.contentTypes.includes(input.contentType)) throw new ValidationError('unsupported content type');
+      if (input.class === 'PHOTO' && !PHOTO_CONTENT_TYPES.includes(input.contentType)) throw new ValidationError('photo must be an image');
       if (input.data.length === 0 || input.data.length > DOCUMENT_LIMITS.maxBytes) throw new ValidationError('bad document size');
       return {
         action: 'document.upload',
@@ -184,7 +189,20 @@ export function documentCommands(deps: { blobs: BlobStore; scanner: MalwareScann
     },
   };
 
-  return { upload, read, applyScan, remove };
+  /**
+   * Bytes of a public PHOTO for the public page: no actor and no audit row
+   * (it is public content, read on every page view). Callers must already
+   * have checked consent + the family's privacy setting. CLEAN only.
+   */
+  async function openPublicPhoto(q: Queryable, documentId: string): Promise<{ contentType: string; data: Buffer }> {
+    const row = await loadDoc(q, documentId);
+    if (row.class !== 'PHOTO' || row.malware_scan !== 'CLEAN') throw new NotFoundError('document', documentId);
+    const data = open(unwrapKey(row), await deps.blobs.get(row.storage_ref), blobAad(row.id));
+    if (sha256Hex(data) !== row.sha256) throw new ConflictError('DOCUMENT_INTEGRITY');
+    return { contentType: row.content_type, data };
+  }
+
+  return { upload, read, applyScan, remove, openPublicPhoto };
 }
 
 export function documentMeta(row: { id: string; class: DocumentClass; retention_class: RetentionClass; content_type: string; size_bytes: number; malware_scan: 'CLEAN' | 'INFECTED' | null }): DocumentMeta {

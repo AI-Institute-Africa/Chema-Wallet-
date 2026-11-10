@@ -18,7 +18,8 @@ type Persona =
   | 'verifier'
   | 'auditor'
   | 'fidelity_admin'
-  | 'system';
+  | 'system'
+  | 'public';
 
 const PERSONAS: Persona[] = [
   'admin',
@@ -31,6 +32,7 @@ const PERSONAS: Persona[] = [
   'auditor',
   'fidelity_admin',
   'system',
+  'public',
 ];
 
 function customer(id: string, roles: WalletRoleName[]): { actor: Actor; relations: Relations } {
@@ -59,10 +61,19 @@ const P: Record<Persona, { actor: Actor; relations: Relations }> = {
   auditor: staff('p-auditor', 'AUDITOR', false),
   fidelity_admin: staff('p-fadmin', 'FIDELITY_ADMIN', false),
   system: { actor: { kind: 'SYSTEM', personId: 'system', mfa: false, channel: 'SYSTEM' }, relations: { walletRoles: new Set(), assigned: false } },
+  public: { actor: { kind: 'PUBLIC', personId: 'public', mfa: false, channel: 'WEB' }, relations: { walletRoles: new Set(), assigned: false } },
 };
 
 /** Rows whose subject belongs to the acting persona. */
-const OWN_ROWS = new Set<Action>(['receipt.view_own', 'consent.manage', 'consent.view', 'payment.view']);
+const OWN_ROWS = new Set<Action>([
+  'receipt.view_own',
+  'consent.manage',
+  'consent.view',
+  'payment.view',
+  'contribution.view_own',
+  'receipt.reissue',
+  'tribute.manage_own',
+]);
 
 function subjectFor(action: Action, persona: Persona): Subject {
   if (action === 'wallet.create_draft') return { type: 'wallet', id: 'new' };
@@ -103,7 +114,8 @@ const EXPECTED: Record<Action, Persona[]> = {
   'wallet.report': [...CUSTOMERS, 'system'],
   'fraud_flag.review': ['verifier', 'fidelity_admin'],
   'wallet.view_ledger': ['admin', 'approver', 'agent', 'claims', 'opsfin', 'verifier', 'auditor', 'fidelity_admin'],
-  'wallet.view_public': PERSONAS.filter((p) => p !== 'system'),
+  // Public page reads do not run through the bus (no login, ACTIVE only), so PUBLIC has no cell here.
+  'wallet.view_public': PERSONAS.filter((p) => p !== 'system' && p !== 'public'),
   'payout.request': ['admin'],
   'payout.approve': ['approver', 'opsfin'],
   'wallet.change_payout_destination': ['admin', 'approver'],
@@ -133,6 +145,18 @@ const EXPECTED: Record<Action, Persona[]> = {
   'document.delete': ['fidelity_admin'],
   'document.scan_result': ['system'],
   'retention.hold': ['fidelity_admin'],
+  // P05: no account needed to contribute.
+  'contribution.create': [...CUSTOMERS, 'public'],
+  // PUBLIC passes the matrix; the signed-link guard is tested in @chema/contributions.
+  'contribution.view_own': [...CUSTOMERS, 'public', 'opsfin', 'auditor'],
+  'contribution.settle': ['system'],
+  'receipt.reissue': [...CUSTOMERS, 'public'],
+  'tribute.manage_own': [...CUSTOMERS, 'public'],
+  'tribute.moderate': ['verifier', 'fidelity_admin'],
+  'wallet.privacy.update': ['admin'],
+  'wallet.photo.set': ['admin'],
+  'group.create': CUSTOMERS,
+  'notification.process': ['system'],
 };
 
 describe('permission matrix — every cell', () => {

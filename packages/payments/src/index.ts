@@ -8,10 +8,12 @@ export { IllegalTransitionError } from './store';
 export { SLA_HOURS, EXCEPTION_OWNER_ROLE, type ExceptionKind, type Severity } from './exceptions';
 export {
   paymentPendingSource,
+  createPayment,
   nextPollDelay,
   POLL,
   viewReceipt,
   type InitiateInput,
+  type InitiateResult,
   type PaymentDeps,
   type ReceiptView,
 } from './collect';

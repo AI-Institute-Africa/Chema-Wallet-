@@ -144,6 +144,13 @@ export const FLAGS = {
   // ── Approvals / KYC / claims ──────────────────────────────────────────
   'approvals.payout_high_value_minor': minor({ description: 'Payout dual-approval threshold; unset ⇒ ALL payouts dual-approved.', decision: 'D04', financial: true }),
   'kyc.contributor_light_max_minor': minor({ description: 'Light-KYC ceiling; unset ⇒ phone+name always required.', financial: true }),
+  // Contribution amount limits (docs/06 "min/max config"). Unset minimum ⇒ any
+  // positive amount (every amount honoured); unset maximum ⇒ contributions in
+  // that currency are refused, because no ceiling has been agreed.
+  'contribution.min_minor.usd': minor({ description: 'Smallest USD contribution (minor units); unset ⇒ any positive amount.', financial: true }),
+  'contribution.min_minor.zwg': minor({ description: 'Smallest ZWG contribution (minor units); unset ⇒ any positive amount.', financial: true }),
+  'contribution.max_minor.usd': minor({ description: 'Largest USD contribution (minor units); unset ⇒ USD contributions refused.', financial: true }),
+  'contribution.max_minor.zwg': minor({ description: 'Largest ZWG contribution (minor units); unset ⇒ ZWG contributions refused.', financial: true }),
   'claims.auto_approve_limit_minor': minor({ description: 'Straight-through claim limit; unset ⇒ all claims manual.', decision: 'D10', financial: true }),
 
   // ── Verification (D05) ────────────────────────────────────────────────

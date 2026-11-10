@@ -26,8 +26,9 @@ export const WALLET_ROLES = [
 export type WalletRoleName = (typeof WALLET_ROLES)[number];
 
 export interface Actor {
-  kind: 'CUSTOMER' | 'STAFF' | 'SYSTEM';
-  /** person.id; 'system' for SYSTEM. */
+  /** PUBLIC = an unauthenticated visitor (contribute without an account, docs/06). */
+  kind: 'CUSTOMER' | 'STAFF' | 'SYSTEM' | 'PUBLIC';
+  /** person.id; 'system' for SYSTEM; 'public' for PUBLIC. */
   personId: string;
   staffRole?: StaffRole;
   /** True only for a staff session that passed TOTP. Customers: false. */
@@ -39,6 +40,22 @@ export interface Actor {
 }
 
 export const SYSTEM_ACTOR: Actor = { kind: 'SYSTEM', personId: 'system', mfa: false, channel: 'SYSTEM' };
+
+/**
+ * An unauthenticated visitor. Holds no wallet role and owns nothing: anything
+ * a PUBLIC actor may do to an existing record is proven by a capability
+ * (e.g. a signed contribution link) checked in the command's guard.
+ */
+export function publicActor(opts: { channel?: Channel; ip?: string; requestRef?: string } = {}): Actor {
+  return {
+    kind: 'PUBLIC',
+    personId: 'public',
+    mfa: false,
+    channel: opts.channel ?? 'WEB',
+    ...(opts.ip ? { ip: opts.ip } : {}),
+    ...(opts.requestRef ? { sessionId: opts.requestRef } : {}),
+  };
+}
 
 /** What is being acted on, resolved server-side from ids — never from client claims. */
 export interface Subject {

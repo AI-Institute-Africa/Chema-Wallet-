@@ -1,0 +1,20 @@
+{
+  "name": "@chema/contributions",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Public page + contribution journey: contributions, receipts, tribute wall, moderation, privacy, groups (P05)",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/test-support.ts"
+  },
+  "dependencies": {
+    "@chema/channels": "workspace:*",
+    "@chema/core": "workspace:*",
+    "@chema/ledger": "workspace:*",
+    "@chema/payments": "workspace:*",
+    "@chema/providers": "workspace:*",
+    "@chema/shared": "workspace:*",
+    "@chema/wallet": "workspace:*"
+  }
+}

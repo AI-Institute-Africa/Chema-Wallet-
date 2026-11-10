@@ -8,7 +8,7 @@
 | P02 ledger | done | 2026-11-10 |
 | P03 payments | done | 2026-11-10 |
 | P04 wallet + verification | done | 2026-11-10 |
-| P05 public page + contribute | todo | |
+| P05 public page + contribute | done | 2026-11-10 |
 | P06 Fidelity claims link | todo | |
 | P07 payouts/governance/closure | todo | |
 | P08 WhatsApp | todo | |
@@ -59,6 +59,17 @@
 - 2026-11-10 — P04: API CORS is an allow-list (`CHEMA_WEB_ORIGINS`, default `CHEMA_PUBLIC_BASE_URL`), with no credentials (Bearer tokens only). Without it the browser web app could not call the API at all.
 - 2026-11-10 — P04: `CHEMA_DEV_OTP_FILE` (dev only, refused when NODE_ENV=production) makes the API append OTP codes to a 0600 file, so the web app can be signed into locally before D16. Codes still never reach the app log.
 - 2026-11-10 — P04: web = Next.js 16 app router in `apps/web` (draft form, evidence upload, status page; client components calling the API). It has its own tsconfig (DOM lib); root `typecheck` runs both. CI also runs `next build`.
+- 2026-11-10 — P05: new package `@chema/contributions` (core + ledger + payments + providers + wallet + channels): contributions, receipts, tribute wall + moderation, family privacy, photo, groups, public read model. Notification skeleton lives in `@chema/channels` (`notify/service.ts`).
+- 2026-11-10 — P05: new actor kind `PUBLIC` (principal `public`, `publicActor()`): contributing needs no account. A PUBLIC actor owns nothing; what it may do to an existing contribution (view, receipt re-issue, tribute remove/appeal) is proven by the signed link, checked in each command's `guard` (audited DENIED `BAD_LINK`). Customers pass as `own` (contributor_person).
+- 2026-11-10 — P05: signed link = HMAC-SHA256(key derived from CHEMA_AUTH_SECRET, `contribution:<id>`), never stored. Web carries it in the URL fragment (`/c/<id>#t=…`) and sends it as `x-contribution-token`, so it never reaches access logs or a Referer. Bad/missing link and NOT_OWNER both answer 404, like an unknown id.
+- 2026-11-10 — P05: a contribution creates its payment in the SAME transaction: `createPayment(tx, deps, actor, input)` was extracted from `payment.initiate` (the bus command still wraps it); `PaymentService.submit(view, msisdn)` sends it to the provider afterwards. `groupId` credits a GROUP sub-ledger account instead of COMMUNITY.
+- 2026-11-10 — P05: `applyConfirmation` now enqueues `payment.succeeded {paymentId, receiptId}` (replaces `receipt.notify`; the worker keeps a no-op handler for old rows) and `applyFailure` enqueues `payment.failed`. Both drive `contribution.settle` (SYSTEM, idempotent: contribution row FOR UPDATE + set-once `settled_state`): receipt_issue ORIGINAL, tribute publish/hide/void, receipt + family notifications, target.reached, events.
+- 2026-11-10 — P05: KYC data (payer name + phone) sealed AES-GCM with a key derived from CHEMA_DATA_KEY (aad = contribution id); phone also stored as a keyed hash for AML lookups. Anonymous hides display only; KYC + audit kept. Receipt contact sealed the same way.
+- 2026-11-10 — P05: privacy applied server-side in `publicPage`: hidden fields are `null` in the JSON, never sent for the client to hide. Total raised is derived from the ledger on every read (CONTRIBUTION/REFUND/CHARGEBACK entries on COMMUNITY + GROUP accounts); payouts do not lower it. Live total = short polling `/public/wallets/:slug/total` (15 s, visible tab only).
+- 2026-11-10 — P05: tribute state machine enforced by `tribute_guard` (AWAITING_PAYMENT → VISIBLE|HIDDEN|VOID|REMOVED, VISIBLE → HIDDEN|REMOVED, HIDDEN → VISIBLE|REJECTED|REMOVED, REJECTED → HIDDEN (appeal, once)|REMOVED; message never edited, erased on REMOVED; no DELETE) + append-only `tribute_event`. Moderation rules run at create; the verdict applies only when the payment succeeds.
+- 2026-11-10 — P05: notifications: one row per message (template key, channel WEB/EMAIL/SMS, sealed params/address, person recipients resolved at send), outbox `notification.send` → claim (tx, 5 min lease) → send (no tx) → record (tx). Retry 1 min doubling, 5 attempts, then DEAD; worker `notifyLoop` retries due rows every 60 s. Senders are MOCKS (D16).
+- 2026-11-10 — P05: pre-payment disclosure via `POST /public/wallets/:slug/quote` (same `quoteFees` the payment uses, writes nothing); the web form shows it before the Contribute button.
+- 2026-11-10 — P05: web: `/w/[slug]` SSR server component (readable without JS), `/w/[slug]/give` (form → disclosure → pay → status), `/c/[id]` (status polling with backoff, receipt, re-issue, remove message), `/wallets/[id]/privacy`, `/w/[slug]/report`. Copy comes from the shared catalogue (`@chema/shared/i18n`, `transpilePackages`).
 - 2026-11-10 — P03: rail flags gate NEW money only (initiate, rail list, webhook intake ⇒ 404 when off). Polling and recon still use the adapter for payments already in flight, so switching a rail off cannot strand moving money.
 
 ## Assumptions (not in spec; safest default taken)
@@ -69,7 +80,7 @@
 - `retention.financial_years` default unset ⇒ retain, never auto-delete (7y is planning only, D12).
 - `verification.evidence_types` default = docs/05 list (any ONE + admin ID + mandate).
 - Local Node is 24; Docker image and CI use Node 22.
-- `apps/web`, `apps/admin` are placeholders; Next.js lands in P04/P05/P09.
+- `apps/admin` is a placeholder (P09). `apps/web` has the P04 family screens + the P05 public page / contribute / receipt / privacy.
 - P01 staff auth: password (scrypt) + TOTP in one step behind `StaffAuthenticator`; ONE role per staff account; SSO adapter later. Spec says "MFA for privileged and financial roles" — applied to ALL staff (stricter).
 - P01 matrix column "fidelity_admin/auditor" split: `FIDELITY_ADMIN` (config, role admin, holds; MFA) vs `AUDITOR` (read only).
 - P01 matrix rows added beyond docs/02 (least privilege): `consent.manage` own only; `consent.view` own + auditor + fidelity_admin; `document.upload` wallet ADMIN / assigned agent / own unlinked; `document.read` uploader, wallet ADMIN, assigned agent/claims/verifier, auditor; `document.delete` + `retention.hold` FIDELITY_ADMIN; `document.scan_result` SYSTEM; `config.change(.approve)` FIDELITY_ADMIN maker/checker.
@@ -111,6 +122,16 @@
 - P04 suspicious-wallet reports: only for ACTIVE wallets. A report opens `case_record` type FRAUD and changes no status. Anonymous reports run as SYSTEM with an HMAC-keyed IP hash (`CHEMA_REPORT_IP_KEY`, else random per process). Limit 5/hour per reporter.
 - P04 `CHEMA_PUBLIC_BASE_URL` (default `http://localhost:3000`) builds share links/QR; web reads `NEXT_PUBLIC_API_URL` (default `http://localhost:7600`).
 
+- P05 privacy defaults: ALL toggles off (total, usage, photo, names, amounts, tributes). The page still shows name, dates, funeral location, badge, contribute/share/report. The family turns things on at `/wallets/[id]/privacy`. Funeral location + dates are always shown (not in doc 06's toggle list).
+- P05 contribution limits: new flags `contribution.min_minor.{usd,zwg}` (unset ⇒ any positive amount: "every amount honoured") and `contribution.max_minor.{usd,zwg}` (unset ⇒ contributions in that currency refused; the page offers no rails). All financial. Contribution currency must equal the wallet currency (no FX source).
+- P05 KYC: name + phone always required. If `kyc.contributor_light_max_minor` is set, amounts above it are refused (`FULL_KYC_REQUIRED`) because full KYC is not built; the ceiling is one number for both currencies (stricter for ZWG).
+- P05 tribute moderation: rules (links, contact details, shouting, repetition, a short abusive-word list, money requests) only hide pending review. Moderators = COMMUNITY_VERIFIER or FIDELITY_ADMIN (`tribute.moderate`, a global queue, not case-scoped). REJECT/HIDE need a note ≥ 10 chars. One appeal per tribute. A flagged message is not forwarded to the family.
+- P05 family notification: SMS + WEB to the wallet admin ("{name} contributed {amount}: {message}"); name = group name / display name / "Sympathetic Friend" (anonymity holds for the family too). The amount is the gift (net when the contributor paid the fee on top, gross when the wallet bore it).
+- P05 receipt re-issue: same content (receipt is append-only), logged in `receipt_issue`, limit 5 per contribution per 24 h; re-sends to the stored contact if any.
+- P05 group contributions (`feature.group_contributions` off): a customer creates a named group per wallet and is its representative; only the representative contributes in its name (guard `NOT_GROUP_REPRESENTATIVE`). The group name is shown publicly.
+- P05 photo: document class `PHOTO` (jpeg/png, retention PUBLIC_CONTENT); `wallet.photo.set` (admin) needs a CLEAN scan and records a PHOTO consent for the wallet. Public only with live consent AND `showPhoto`; withdrawing the consent hides it at once. Served at `/public/wallets/:slug/photo` (nosniff, CSP none), not audited per view.
+- P05 no HTTP rate limiting on public contribute/quote yet (P10). The idempotency key is client-generated (one per form).
+
 ## Gotchas / handoff to next phase
 - New state change = a `Command {name, resolve, run}` run through `core.bus.execute`. Add its action to `ACTIONS` + `MATRIX` (`packages/core/src/authz/matrix.ts`) AND to the independent `EXPECTED` table in `matrix.test.ts` (the test fails if either is missing). Step-up actions: `STEP_UP_ACTIONS`; maker→checker pairs: `CHECKER_ACTION`.
 - Maker-checker: in the maker command call `createApproval(tx, actor, {action, subject…, payload})`; the checker runs `decideApproval`; the maker then executes with `consumeApproval(tx, actor, id, {…same payload})`. `requiresDual(action, amount, threshold)` says whether a checker is needed. Escalation for an unavailable approver is NOT built (P07).
@@ -139,4 +160,9 @@
 - P08/P09: wallet outbox topics (`WALLET_TOPICS`) are logged-only in the worker. Real notifications, the fraud-case workflow and the report queue UI come later.
 - Local end to end: `docker compose up -d postgres redis`, `pnpm db:migrate`, then run the API with `CHEMA_DEV_OTP_FILE=.data/dev-otp.log` plus the worker (it scans uploads; submit needs CLEAN scans), and `pnpm --filter @chema/web dev`. `NEXT_PUBLIC_API_URL` is inlined at build time. Staff accounts still need code (`StaffAuthService.enroll`): no seed CLI until P09. This full flow was run on 2026-11-10 against real Postgres + Redis + worker + `next start`: OTP login, draft, 3 uploads, scan, submit, assign, decide, public page/QR/badge, payment 201, suspend ⇒ 404, CORS 204, audit chain OK.
 - Re-running with the same deceased name/date/location creates DUPLICATE_DECEASED flags, and approval then waits for a human review. That is intended.
-- Next migration = 0013.
+- Next migration = 0014.
+- Contributions (P05): channels call `ContributionService` (`@chema/contributions`): `contribute`, `quote`, `view`, `reissueReceipt`, `removeTribute`, `appealTribute`, `settle` (worker), `page`, `total`, `tributes`, `photoDocument`; bus commands in `.commands` (listMine, moderationQueue, moderate, viewPrivacy, updatePrivacy, setPhoto, createGroup). Tests: `createContributionHarness()` from `@chema/contributions/testing` (real verification + mock rails + `verifiedWalletGate`; `t.publicWallet(privacy?, target?)`, `t.guest()`, `t.input(slug)`, `t.deliver(rail)`, `t.pump()` = outbox relay + worker handlers, `t.sms`/`t.email` mock senders).
+- P08 WhatsApp: contribute via `ContributionService.contribute` with a PUBLIC actor (channel WHATSAPP) or the customer; receipt lookup = `listMine` (customer) or the signed link. Notifications: add a WhatsApp `ChannelSender` and channel value (migration widens the CHECK).
+- P07: payouts raise `usage.paidOut` (from `getBalances().paid`), not lower `raised`. Refunds/chargebacks lower `raised`. A refunded contribution's tribute stays VISIBLE (not decided).
+- P09: notification DEAD rows and the tribute review queue need admin screens; `contribution.*`, `tribute.flagged`, `target.reached` outbox topics are logged only.
+- P05 was not smoke-run against real Postgres + Redis + `next start` (P04 was); tests run on PGlite + inject. First thing to do when the stack is up.
