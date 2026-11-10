@@ -1,12 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
+import type { CoreServices } from '@chema/core';
 import { createLogger, type SqlClient } from '@chema/shared';
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
+import { registerRoutes } from './routes';
 
 export interface AppOptions {
   db?: SqlClient;
   logger?: FastifyBaseLogger;
   version?: string;
+  /** Core services; without them only health routes are served. */
+  core?: CoreServices;
 }
 
 const SAFE_REQUEST_ID = /^[A-Za-z0-9._-]{1,64}$/;
@@ -42,6 +46,8 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
       return reply.code(503).send({ ok: false, db: 'down' });
     }
   });
+
+  if (opts.core) registerRoutes(app, opts.core);
 
   return app;
 }

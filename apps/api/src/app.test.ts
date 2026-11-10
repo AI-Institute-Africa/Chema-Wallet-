@@ -52,7 +52,7 @@ describe('api', () => {
     await buildApp({ logger }).inject({ url: '/health?phone=%2B263771234567&to=0771234567' });
     const out = lines.join('');
     expect(out).toContain('"method":"GET"');
-    expect(out).toContain('"url":"/health?phone=***567&to=***567"');
+    expect(out).toContain('"url":"/health?phone=[REDACTED]&to=[REDACTED]"');
     expect(out).toContain('"statusCode":200');
     expect(out).not.toContain('771234567');
   });

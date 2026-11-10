@@ -6,6 +6,8 @@ RUN npm install -g pnpm@10.33.0
 COPY . .
 RUN pnpm install --frozen-lockfile
 ENV NODE_ENV=production PORT=7600 HOST=0.0.0.0
+# Encrypted document blobs (named volume inherits this ownership on first mount).
+RUN mkdir -p /data/blobs && chown node:node /data/blobs
 USER node
 EXPOSE 7600
 CMD ["sh", "-c", "node --import tsx packages/shared/src/db/cli.ts && exec node --import tsx apps/api/src/server.ts"]

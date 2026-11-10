@@ -27,14 +27,22 @@ services:
       timeout: 3s
       retries: 20
 
+  # api + worker need CHEMA_AUTH_SECRET and CHEMA_DATA_KEY in .env (see
+  # .env.example). Without them the api serves health routes only and the
+  # worker exits with an error: there are no built-in default keys, by design.
   api:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    environment:
+    environment: &app-env
       DATABASE_URL: postgres://chema:${POSTGRES_PASSWORD:-change-me}@postgres:5432/chema
       REDIS_URL: redis://redis:6379
       LOG_LEVEL: info
+      CHEMA_AUTH_SECRET: ${CHEMA_AUTH_SECRET:-}
+      CHEMA_DATA_KEY: ${CHEMA_DATA_KEY:-}
+      CHEMA_BLOB_DIR: /data/blobs
+    volumes:
+      - blobs:/data/blobs
     ports:
       - "7600:7600"
     depends_on:
@@ -43,5 +51,20 @@ services:
       redis:
         condition: service_healthy
 
+  # Outbox relay + job consumer (document scan/purge). Starts after the api,
+  # which applies migrations on boot.
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["node", "--import", "tsx", "apps/api/src/worker.ts"]
+    environment: *app-env
+    volumes:
+      - blobs:/data/blobs
+    depends_on:
+      api:
+        condition: service_started
+
 volumes:
   pgdata:
+  blobs:

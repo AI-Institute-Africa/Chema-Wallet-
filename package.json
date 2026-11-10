@@ -13,7 +13,9 @@
     "secret-scan": "node scripts/secret-scan.mjs",
     "verify": "node scripts/ci.mjs",
     "db:migrate": "tsx packages/shared/src/db/cli.ts",
-    "dev:api": "pnpm --filter @chema/api dev"
+    "dev:api": "pnpm --filter @chema/api dev",
+    "audit:verify": "tsx packages/core/src/audit/verify-cli.ts",
+    "dev:worker": "pnpm --filter @chema/api worker"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
