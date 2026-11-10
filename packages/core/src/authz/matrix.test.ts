@@ -157,6 +157,15 @@ const EXPECTED: Record<Action, Persona[]> = {
   'wallet.photo.set': ['admin'],
   'group.create': CUSTOMERS,
   'notification.process': ['system'],
+  // P06 (docs/07): consent is checked in the command guard, not the matrix.
+  'claim.lookup_policy': ['admin', 'agent', 'claims'],
+  'claim.link': ['admin', 'agent'],
+  'claim.submit_evidence': ['admin', 'agent'],
+  'claim.view': ['admin', 'approver', 'agent', 'claims', 'auditor', 'fidelity_admin'],
+  'claim.process': ['system'],
+  // Assignment of the maker is checked in the command guard.
+  'claim.route.unblock': ['claims'],
+  'claim.route.unblock.approve': ['opsfin'],
 };
 
 describe('permission matrix — every cell', () => {
@@ -198,6 +207,9 @@ describe('scope: case-level authorisation (IDOR)', () => {
     ['agent', 'document.read'],
     ['claims', 'wallet.view_ledger'],
     ['claims', 'claim.decide'],
+    ['claims', 'claim.lookup_policy'],
+    ['claims', 'claim.view'],
+    ['agent', 'claim.link'],
     ['claims', 'document.read'],
     ['verifier', 'verification.decide'],
     ['verifier', 'wallet.view_ledger'],

@@ -21,7 +21,7 @@ import {
   ReservationStateError,
   UnknownJournalError,
 } from './errors';
-import { validateJournal } from './guards';
+import { validateBenefitRules, validateJournal } from './guards';
 import { JOURNAL_KINDS, type EntryInput, type JournalInput, type JournalKind, type PostResult, type Side } from './types';
 
 const REVERSAL_KEY_PREFIX = 'reverse:';
@@ -113,6 +113,7 @@ async function write(
     input.entries.map((e) => e.accountId),
   );
   const shape = validateJournal(input.entries, accounts, { reversal });
+  validateBenefitRules(input.kind, input.entries, accounts, { reversal });
   const hash = journalHash(input, reversesJournalId);
   const debits = [...shape.walletDebits];
   if (isPayout && debits.length !== 1) throw new LedgerValidationError('PAYOUT_DEBITS_ONE_ACCOUNT');

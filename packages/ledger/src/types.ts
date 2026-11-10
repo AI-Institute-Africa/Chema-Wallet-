@@ -11,6 +11,11 @@ export const SYSTEM_ACCOUNT_KINDS = [
   'SUSPENSE_UNMATCHED',
   /** Recon differences within tolerance (P03, docs/04 §7): recorded, never written off silently. */
   'RECON_DIFF',
+  /**
+   * P06: Fidelity benefit in transit (docs/07). An insurance obligation, never
+   * platform revenue: it only ever meets W:FIDELITY_BENEFIT, in BENEFIT journals.
+   */
+  'BENEFIT_CLEARING',
 ] as const;
 export type SystemAccountKind = (typeof SYSTEM_ACCOUNT_KINDS)[number];
 

@@ -180,14 +180,16 @@ function run(ws: TestWallet[], m: Model, op: Op): Promise<void> {
     switch (op.t) {
       case 'credit': {
         const a = acct(op.w, op.s);
-        await postJournal(twoLeg(op.s === 0 ? 'CONTRIBUTION' : 'BENEFIT', sys.providerClearing.id, a.id, op.amt), a.id, op.amt, null);
+        await postJournal(twoLeg(op.s === 0 ? 'CONTRIBUTION' : 'BENEFIT', (op.s === 0 ? sys.providerClearing : sys.benefitClearing).id, a.id, op.amt), a.id, op.amt, null);
         return;
       }
       case 'debit': {
         const a = acct(op.w, op.s);
         const to = op.to === 'FEES' ? sys.fees : sys.refundClearing;
         const ok = op.amt <= m.available(a.id);
-        await postJournal(twoLeg(op.to === 'FEES' ? 'FEE' : 'REFUND', a.id, to.id, op.amt), a.id, -op.amt, ok ? null : 'InsufficientFundsError');
+        // P06: no fee ever touches the Fidelity benefit (checked before funds).
+        const err = op.s === 1 && op.to === 'FEES' ? 'BenefitSourceError' : ok ? null : 'InsufficientFundsError';
+        await postJournal(twoLeg(op.to === 'FEES' ? 'FEE' : 'REFUND', a.id, to.id, op.amt), a.id, -op.amt, err);
         return;
       }
       case 'reserve': {

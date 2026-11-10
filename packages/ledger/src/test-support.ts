@@ -22,6 +22,8 @@ export interface SystemAccounts {
   fees: LedgerAccount;
   refundClearing: LedgerAccount;
   suspense: LedgerAccount;
+  /** P06: the only account a BENEFIT journal may draw from. */
+  benefitClearing: LedgerAccount;
 }
 
 export function seedSystem(db: SqlClient, currency: Currency = 'USD'): Promise<SystemAccounts> {
@@ -31,6 +33,7 @@ export function seedSystem(db: SqlClient, currency: Currency = 'USD'): Promise<S
     fees: await ensureSystemAccount(tx, 'FEES', currency),
     refundClearing: await ensureSystemAccount(tx, 'REFUND_CLEARING', currency),
     suspense: await ensureSystemAccount(tx, 'SUSPENSE_UNMATCHED', currency),
+    benefitClearing: await ensureSystemAccount(tx, 'BENEFIT_CLEARING', currency),
   }));
 }
 
@@ -47,7 +50,7 @@ export async function seedWallet(db: SqlClient, currency: Currency = 'USD'): Pro
   return { walletId, ...accounts };
 }
 
-/** Confirmed incoming money: DR provider clearing / CR the wallet account. */
+/** Confirmed incoming money: DR provider clearing (benefit: benefit clearing) / CR the wallet account. */
 export function creditWallet(
   db: SqlClient,
   sys: SystemAccounts,
@@ -56,12 +59,13 @@ export function creditWallet(
   idempotencyKey: string = `test:${randomUUID()}`,
 ): Promise<PostResult> {
   const amount = money(minor, account.currency);
+  const benefit = account.kind === 'FIDELITY_BENEFIT';
   return inTx(db, (tx) =>
     post(tx, TEST_ACTOR, {
       idempotencyKey,
-      kind: account.kind === 'FIDELITY_BENEFIT' ? 'BENEFIT' : 'CONTRIBUTION',
+      kind: benefit ? 'BENEFIT' : 'CONTRIBUTION',
       entries: [
-        { accountId: sys.providerClearing.id, side: 'D', amount },
+        { accountId: (benefit ? sys.benefitClearing : sys.providerClearing).id, side: 'D', amount },
         { accountId: account.id, side: 'C', amount },
       ],
     }),

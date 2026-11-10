@@ -14,7 +14,7 @@ export {
   lockWallet,
   type WalletAccounts,
 } from './accounts';
-export { validateJournal, type JournalShape } from './guards';
+export { validateBenefitRules, validateJournal, type JournalShape } from './guards';
 export { post, reverse } from './post';
 export { reserve, release, type ReserveInput, type ReserveResult } from './reservations';
 export { placeHold, releaseHold, type HoldInput } from './holds';

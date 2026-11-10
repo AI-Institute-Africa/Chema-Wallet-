@@ -64,6 +64,16 @@ export class SubLedgerExitError extends LedgerError {
   }
 }
 
+/**
+ * P06 source rules (docs/07 §4 §6): the Fidelity benefit enters only through a
+ * BENEFIT journal from BENEFIT_CLEARING, and no fee ever touches it.
+ */
+export class BenefitSourceError extends LedgerError {
+  constructor(readonly rule: string) {
+    super('BENEFIT_SOURCE_RULE', `benefit source rule broken: ${rule}`);
+  }
+}
+
 export class InsufficientFundsError extends LedgerError {
   constructor(
     readonly accountId: string,

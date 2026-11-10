@@ -90,6 +90,13 @@ export const ACTIONS = [
   'wallet.photo.set',
   'group.create',
   'notification.process',
+  'claim.lookup_policy',
+  'claim.link',
+  'claim.submit_evidence',
+  'claim.view',
+  'claim.process',
+  'claim.route.unblock',
+  'claim.route.unblock.approve',
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -209,6 +216,28 @@ export const MATRIX: Readonly<Record<Action, Cells>> = {
   // authorised representative is the customer who creates it.
   'group.create': { contributor: 'allow' },
   'notification.process': { system: 'allow' },
+  // P06 Fidelity claim path (docs/07), all behind `fidelity.claims_link`.
+  // Chema never decides claims (`claim.decide` stays Fidelity-side): it looks
+  // up a policy (consent-gated, checked in the guard), lodges/links the claim,
+  // shares evidence and mirrors what Fidelity reports (SYSTEM only).
+  'claim.lookup_policy': { admin: 'allow', agent: 'assigned', claims: 'assigned' },
+  'claim.link': { admin: 'allow', agent: 'assigned' },
+  'claim.submit_evidence': { admin: 'allow', agent: 'assigned' },
+  // Never contributors: claim detail is not public (docs/07 Never).
+  'claim.view': {
+    admin: 'allow',
+    approver: 'allow',
+    agent: 'assigned',
+    claims: 'assigned',
+    auditor: 'allow',
+    fidelity_admin: 'allow',
+  },
+  'claim.process': { system: 'allow' },
+  // Beneficiary mismatch (D03): a claims officer records the written
+  // Legal + Claims + Finance approval (maker; assignment checked in the guard),
+  // ops/finance checks it. Never unblocked by inference.
+  'claim.route.unblock': { claims: 'maker' },
+  'claim.route.unblock.approve': { opsfin: 'checker' },
 };
 
 /** Actions that need a fresh step-up grant (docs/02 Step-up). */
@@ -226,4 +255,5 @@ export const CHECKER_ACTION: Readonly<Partial<Record<Action, Action>>> = {
   'ledger.adjust': 'ledger.adjust.approve',
   'config.change': 'config.change.approve',
   'payment.refund': 'payment.refund.approve',
+  'claim.route.unblock': 'claim.route.unblock.approve',
 };

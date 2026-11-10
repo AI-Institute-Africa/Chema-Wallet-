@@ -3,6 +3,7 @@
 // with a typed error, before anything is written.
 import type { Currency } from '@chema/shared';
 import {
+  BenefitSourceError,
   CrossSubLedgerError,
   CrossWalletError,
   LedgerValidationError,
@@ -10,7 +11,7 @@ import {
   UnbalancedJournalError,
   UnknownAccountError,
 } from './errors';
-import { WALLET_EXIT_KINDS, type EntryInput, type LedgerAccount } from './types';
+import { WALLET_EXIT_KINDS, type EntryInput, type JournalKind, type LedgerAccount } from './types';
 
 export interface JournalShape {
   /** The one wallet the journal touches, or null for a system-only journal. */
@@ -70,4 +71,46 @@ export function validateJournal(
 
   const [walletId] = wallets;
   return { walletId: walletId ?? null, walletDebits };
+}
+
+/** Journal kinds that may carry BENEFIT_CLEARING besides BENEFIT itself (system-side only). */
+const BENEFIT_CLEARING_KINDS: ReadonlySet<JournalKind> = new Set<JournalKind>(['BENEFIT', 'SETTLEMENT', 'ADJUSTMENT']);
+
+/**
+ * P06 benefit source rules (docs/07 §4 §6), also enforced by the
+ * `ledger_benefit_guard` trigger (migration 0014):
+ *   1. a BENEFIT journal touches only W:FIDELITY_BENEFIT and SYS:BENEFIT_CLEARING;
+ *   2. W:FIDELITY_BENEFIT is credited only by BENEFIT (or ADJUSTMENT) journals;
+ *   3. no journal with a W:FIDELITY_BENEFIT leg has a FEES leg (no fee on the benefit);
+ *   4. BENEFIT_CLEARING appears only in BENEFIT / SETTLEMENT / ADJUSTMENT journals.
+ * A reversal keeps its original's kind and mirrors its legs, so rules 1, 3 and
+ * 4 hold for it too; rule 2 is skipped for reversals (undoing a benefit payout
+ * credits the benefit back under kind PAYOUT).
+ */
+export function validateBenefitRules(
+  kind: JournalKind,
+  entries: readonly EntryInput[],
+  accounts: ReadonlyMap<string, LedgerAccount>,
+  opts: { reversal?: boolean } = {},
+): void {
+  let benefitNet = 0n;
+  let hasBenefit = false;
+  let hasFees = false;
+  let hasClearing = false;
+  for (const e of entries) {
+    const a = accounts.get(e.accountId);
+    if (!a) continue;
+    if (a.kind === 'FIDELITY_BENEFIT') {
+      hasBenefit = true;
+      benefitNet += e.side === 'C' ? e.amount.minor : -e.amount.minor;
+    }
+    if (a.kind === 'FEES') hasFees = true;
+    if (a.kind === 'BENEFIT_CLEARING') hasClearing = true;
+    if (kind === 'BENEFIT' && a.kind !== 'FIDELITY_BENEFIT' && a.kind !== 'BENEFIT_CLEARING') {
+      throw new BenefitSourceError('BENEFIT_JOURNAL_ACCOUNTS');
+    }
+  }
+  if (!opts.reversal && benefitNet > 0n && kind !== 'BENEFIT' && kind !== 'ADJUSTMENT') throw new BenefitSourceError('BENEFIT_CREDIT_KIND');
+  if (hasBenefit && hasFees) throw new BenefitSourceError('NO_FEE_ON_BENEFIT');
+  if (hasClearing && !BENEFIT_CLEARING_KINDS.has(kind)) throw new BenefitSourceError('BENEFIT_CLEARING_KIND');
 }
