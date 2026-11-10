@@ -3,6 +3,11 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Payment provider adapters (P03)",
-  "exports": { ".": "./src/index.ts" }
+  "description": "Payment provider adapters: interface + mock rails (P03)",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@chema/shared": "workspace:*"
+  }
 }

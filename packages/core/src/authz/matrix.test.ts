@@ -62,7 +62,7 @@ const P: Record<Persona, { actor: Actor; relations: Relations }> = {
 };
 
 /** Rows whose subject belongs to the acting persona. */
-const OWN_ROWS = new Set<Action>(['receipt.view_own', 'consent.manage', 'consent.view']);
+const OWN_ROWS = new Set<Action>(['receipt.view_own', 'consent.manage', 'consent.view', 'payment.view']);
 
 function subjectFor(action: Action, persona: Persona): Subject {
   if (action === 'wallet.create_draft') return { type: 'wallet', id: 'new' };
@@ -103,6 +103,14 @@ const EXPECTED: Record<Action, Persona[]> = {
   'wallet.replace_admin.approve': ['admin', 'approver'],
   'claim.decide': ['claims'],
   'ledger.adjust': ['opsfin'],
+  'payment.initiate': ['contributor', 'admin', 'approver'],
+  // own payment only for customers (owner = payer)
+  'payment.view': [...CUSTOMERS, 'opsfin', 'auditor'],
+  'payment.process': ['system'],
+  'payment.refund': ['opsfin'],
+  'payment.refund.approve': ['opsfin'],
+  'recon.run': ['opsfin', 'system'],
+  'recon.exception.view': ['opsfin', 'auditor'],
   'ledger.adjust.approve': ['opsfin'],
   // "view own contribution/receipt: contributor Y" — any customer, own receipt only.
   'receipt.view_own': CUSTOMERS,

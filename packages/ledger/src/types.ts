@@ -9,6 +9,8 @@ export const SYSTEM_ACCOUNT_KINDS = [
   'FEES',
   'REFUND_CLEARING',
   'SUSPENSE_UNMATCHED',
+  /** Recon differences within tolerance (P03, docs/04 §7): recorded, never written off silently. */
+  'RECON_DIFF',
 ] as const;
 export type SystemAccountKind = (typeof SYSTEM_ACCOUNT_KINDS)[number];
 

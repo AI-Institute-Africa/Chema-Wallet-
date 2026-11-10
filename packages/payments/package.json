@@ -1,0 +1,17 @@
+{
+  "name": "@chema/payments",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Collection pipeline: payment state machine, provider events, polling, refunds, chargebacks, fees, reconciliation (P03)",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/test-support.ts"
+  },
+  "dependencies": {
+    "@chema/core": "workspace:*",
+    "@chema/ledger": "workspace:*",
+    "@chema/providers": "workspace:*",
+    "@chema/shared": "workspace:*"
+  }
+}

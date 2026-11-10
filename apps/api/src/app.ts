@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { CoreServices } from '@chema/core';
+import type { PaymentService } from '@chema/payments';
 import { createLogger, type SqlClient } from '@chema/shared';
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
+import { registerPaymentRoutes } from './payment-routes';
 import { registerRoutes } from './routes';
 
 export interface AppOptions {
@@ -11,6 +13,8 @@ export interface AppOptions {
   version?: string;
   /** Core services; without them only health routes are served. */
   core?: CoreServices;
+  /** Payments (P03); needs core. */
+  payments?: PaymentService;
 }
 
 const SAFE_REQUEST_ID = /^[A-Za-z0-9._-]{1,64}$/;
@@ -47,7 +51,10 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     }
   });
 
-  if (opts.core) registerRoutes(app, opts.core);
+  if (opts.core) {
+    registerRoutes(app, opts.core);
+    if (opts.payments) registerPaymentRoutes(app, opts.core, opts.payments);
+  }
 
   return app;
 }
