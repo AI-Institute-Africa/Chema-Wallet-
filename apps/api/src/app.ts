@@ -2,11 +2,13 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { CoreServices } from '@chema/core';
 import type { ContributionService } from '@chema/contributions';
+import type { ClaimsService } from '@chema/fidelity';
 import type { PaymentService } from '@chema/payments';
 import { createLogger, type SqlClient } from '@chema/shared';
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 import { registerContributionRoutes } from './contribution-routes';
 import { registerCors } from './cors';
+import { registerFidelityRoutes } from './fidelity-routes';
 import { registerPaymentRoutes } from './payment-routes';
 import { registerRoutes } from './routes';
 import { registerWalletRoutes, type WalletWiring } from './wallet-routes';
@@ -23,6 +25,8 @@ export interface AppOptions {
   wallets?: WalletWiring;
   /** Public page + contributions (P05); needs core + payments. */
   contributions?: ContributionService;
+  /** Fidelity claim path (P06); needs core. Claim routes 404 while `fidelity.claims_link` is off. */
+  claims?: ClaimsService;
   /** Browser origins allowed to call the API (the web app). Empty ⇒ no CORS headers. */
   corsOrigins?: readonly string[];
 }
@@ -71,6 +75,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
       registerWalletRoutes(app, opts.core, contributions ? { ...opts.wallets, publicPage: (slug) => contributions.page(slug) } : opts.wallets);
     }
     if (contributions) registerContributionRoutes(app, opts.core, contributions);
+    if (opts.claims) registerFidelityRoutes(app, opts.core, opts.claims);
   }
 
   return app;

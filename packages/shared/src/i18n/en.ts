@@ -48,6 +48,15 @@ export const en = {
   'notify.family.contribution': '{name} contributed {amount}: {message}',
   'notify.family.contribution_plain': '{name} contributed {amount}.',
   'notify.family.target_reached': 'The contributions for {name} have reached the funeral costs you set. Thank you for letting us help.',
+  // P06 family funds view (docs/07 §7): each source labelled, never merged.
+  'funds.source.community': 'Community contributions',
+  'funds.source.group': 'Group contributions',
+  'funds.source.fidelity_benefit': 'Fidelity benefit',
+  'funds.benefit.status_updating': 'Status updating. We will refresh it as soon as Fidelity responds.',
+  'funds.benefit.not_linked': 'No Fidelity claim is linked to this wallet.',
+  'funds.benefit.route_blocked': 'The benefit is on hold while Fidelity confirms who should receive it. Community contributions are not affected.',
+  'funds.benefit.declined': 'Fidelity did not approve the claim. Community contributions are not affected.',
+  'funds.benefit.payment_pending': 'Fidelity approved the benefit; the payment has not settled yet.',
 } as const;
 
 export type MessageKey = keyof typeof en;

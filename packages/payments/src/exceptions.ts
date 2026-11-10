@@ -10,7 +10,13 @@ export type ExceptionKind =
   | 'WRONG_DESTINATION'
   | 'CHARGEBACK_SHORTFALL'
   | 'POLL_WINDOW_EXPIRED'
-  | 'CURRENCY_MISMATCH';
+  | 'CURRENCY_MISMATCH'
+  // P06: benefit credits vs the Fidelity record (rail 'FIDELITY').
+  | 'BENEFIT_UNCREDITED'
+  | 'BENEFIT_AMOUNT_VARIANCE'
+  | 'BENEFIT_NOT_IN_RECORD'
+  | 'BENEFIT_CURRENCY_MISMATCH'
+  | 'BENEFIT_STATE_CONFLICT';
 
 export type Severity = 'LOW' | 'MEDIUM' | 'HIGH';
 
@@ -71,7 +77,7 @@ export async function raiseException(q: Queryable, input: RaiseInput, now: Date)
   return { id: existing.rows[0]?.id ?? '', created: false };
 }
 
-export type CaseType = 'CHARGEBACK' | 'REFUND' | 'RECON';
+export type CaseType = 'CHARGEBACK' | 'REFUND' | 'RECON' | 'BENEFICIARY_MISMATCH';
 
 export async function openCase(
   q: Queryable,

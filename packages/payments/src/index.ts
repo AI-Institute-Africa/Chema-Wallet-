@@ -5,7 +5,18 @@ export { RailRegistry, LiveFundsDisabledError, railFlagKey } from './rails';
 export { DENY_ALL_GATE, type ContributionGate } from './gate';
 export { quoteFees, disclosureOf, FeeExceedsAmountError, type Quote } from './fees';
 export { IllegalTransitionError } from './store';
-export { SLA_HOURS, EXCEPTION_OWNER_ROLE, type ExceptionKind, type Severity } from './exceptions';
+export {
+  SLA_HOURS,
+  EXCEPTION_OWNER_ROLE,
+  closeCase,
+  openCase,
+  raiseException,
+  slaDue,
+  type CaseType,
+  type ExceptionKind,
+  type RaiseInput,
+  type Severity,
+} from './exceptions';
 export {
   paymentPendingSource,
   createPayment,

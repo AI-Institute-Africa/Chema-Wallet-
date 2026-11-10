@@ -3,6 +3,20 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Fidelity claims adapter (P06)",
-  "exports": { ".": "./src/index.ts" }
+  "description": "Fidelity policy & claims link: adapter interface, MockFidelity, claim mirror, benefit credit, benefit recon (P06)",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/test-support.ts"
+  },
+  "dependencies": {
+    "@chema/core": "workspace:*",
+    "@chema/ledger": "workspace:*",
+    "@chema/payments": "workspace:*",
+    "@chema/providers": "workspace:*",
+    "@chema/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@chema/contributions": "workspace:*",
+    "@chema/wallet": "workspace:*"
+  }
 }

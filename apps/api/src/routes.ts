@@ -20,6 +20,7 @@ import {
 } from '@chema/core';
 import { InsufficientFundsError, LedgerError } from '@chema/ledger';
 import { WebhookRejectedError } from '@chema/providers';
+import { FidelityNotConfiguredError, FidelityUnavailableError } from '@chema/fidelity';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 
@@ -69,6 +70,10 @@ export function registerRoutes(app: FastifyInstance, core: CoreServices): void {
     if (err instanceof RateLimitedError) return reply.code(429).send({ error: 'rate_limited' });
     // Forged / stale provider callback: nothing was stored.
     if (err instanceof WebhookRejectedError) return reply.code(401).send({ error: 'webhook_rejected' });
+    // Fidelity unreachable / not configured (D14): nothing changed; try again later.
+    if (err instanceof FidelityUnavailableError || err instanceof FidelityNotConfiguredError) {
+      return reply.code(503).send({ error: 'fidelity_unavailable' });
+    }
     if (err instanceof InsufficientFundsError) return reply.code(409).send({ error: 'insufficient_funds' });
     if (err instanceof LedgerError) return reply.code(409).send({ error: 'ledger_rejected' });
     const status = (err as { statusCode?: number }).statusCode;

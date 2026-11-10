@@ -14,8 +14,10 @@ import { createLogger, createPgClient } from '@chema/shared';
 import { CONTRIBUTION_TOPICS } from '@chema/contributions';
 import { NOTIFICATION_TOPIC } from '@chema/channels';
 import { WALLET_TOPICS } from '@chema/wallet';
+import { CLAIM_TOPICS, FIDELITY_EVENT_TOPIC } from '@chema/fidelity';
 import { z } from 'zod';
 import { buildContributions } from './contributions';
+import { buildClaims } from './fidelity';
 import { buildPayments } from './payments';
 
 const log = createLogger(process.env['LOG_LEVEL'] ?? 'info');
@@ -39,6 +41,8 @@ const contributions = buildContributions(core, payments.service, {
   publicBaseUrl: process.env['CHEMA_PUBLIC_BASE_URL'] ?? 'http://localhost:3000',
 });
 
+const claims = buildClaims(core, secrets);
+
 const DocPayload = z.object({ documentId: z.uuid() });
 const EventPayload = z.object({ eventRowId: z.uuid() });
 const ReceiptPayload = z.object({ receiptId: z.uuid() });
@@ -51,7 +55,7 @@ const WalletEventPayload = z.object({ walletId: z.uuid() }).loose();
 // D16 + P08/P09; until then each event is acknowledged and logged (ids only).
 // A delivery failure never touches wallet state.
 const walletHandlers = Object.fromEntries(
-  [...WALLET_TOPICS, ...CONTRIBUTION_TOPICS].map((topic) => [
+  [...WALLET_TOPICS, ...CONTRIBUTION_TOPICS, ...CLAIM_TOPICS].map((topic) => [
     topic,
     async (payload: unknown) => {
       const { walletId } = WalletEventPayload.parse(payload);
@@ -74,6 +78,12 @@ const outboxWorker = createOutboxWorker(redisUrl, {
   'payment.event': async (payload) => {
     const { eventRowId } = EventPayload.parse(payload);
     await payments.service.processEvent(eventRowId);
+  },
+  // Verified Fidelity callback stored by the API: queue + run a SYNC (idempotent).
+  [FIDELITY_EVENT_TOPIC]: async (payload) => {
+    const { eventRowId } = EventPayload.parse(payload);
+    const r = await claims.service.processEvent(eventRowId);
+    log.info({ eventRowId, outcome: r.outcome }, 'fidelity event');
   },
   // Rows written before P05 used this topic; contribution.settle now owns receipts.
   'receipt.notify': async (payload) => {
@@ -135,6 +145,21 @@ async function notifyLoop(): Promise<void> {
   }
 }
 
+/** Fidelity calls: retries (backoff per request) + periodic re-reads of open claims. */
+async function fidelityLoop(): Promise<void> {
+  while (!stopping) {
+    try {
+      if (await core.flags.get('fidelity.claims_link')) {
+        const r = await claims.service.pollDue();
+        if (r.queued || r.attempted) log.info(r, 'fidelity poll');
+      }
+    } catch (err) {
+      log.error({ err }, 'fidelity poll error');
+    }
+    await new Promise((r) => setTimeout(r, 60_000));
+  }
+}
+
 /** Daily reconciliation of yesterday, every rail; re-running a day is idempotent. */
 async function reconLoop(): Promise<void> {
   while (!stopping) {
@@ -146,6 +171,14 @@ async function reconLoop(): Promise<void> {
       } catch (err) {
         log.error({ err, rail, day }, 'reconciliation error');
       }
+    }
+    // Benefit credits vs Fidelity's benefit ledger (docs/07 Resilience).
+    try {
+      if (await core.flags.get('fidelity.claims_link')) {
+        log.info({ day, ...(await claims.service.runRecon(SYSTEM_ACTOR, day)) }, 'benefit reconciliation run');
+      }
+    } catch (err) {
+      log.error({ err, day }, 'benefit reconciliation error');
     }
     await new Promise((r) => setTimeout(r, 6 * 3_600_000));
   }
@@ -167,3 +200,4 @@ void relayLoop();
 void pollLoop();
 void notifyLoop();
 void reconLoop();
+void fidelityLoop();

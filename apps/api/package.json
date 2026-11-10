@@ -14,6 +14,7 @@
   "dependencies": {
     "@chema/channels": "workspace:*",
     "@chema/contributions": "workspace:*",
+    "@chema/fidelity": "workspace:*",
     "@chema/core": "workspace:*",
     "@chema/ledger": "workspace:*",
     "@chema/payments": "workspace:*",

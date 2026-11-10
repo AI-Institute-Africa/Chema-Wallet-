@@ -46,6 +46,9 @@ importers:
       '@chema/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@chema/fidelity':
+        specifier: workspace:*
+        version: link:../../packages/fidelity
       '@chema/ledger':
         specifier: workspace:*
         version: link:../../packages/ledger
@@ -138,7 +141,30 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
 
-  packages/fidelity: {}
+  packages/fidelity:
+    dependencies:
+      '@chema/core':
+        specifier: workspace:*
+        version: link:../core
+      '@chema/ledger':
+        specifier: workspace:*
+        version: link:../ledger
+      '@chema/payments':
+        specifier: workspace:*
+        version: link:../payments
+      '@chema/providers':
+        specifier: workspace:*
+        version: link:../providers
+      '@chema/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      '@chema/contributions':
+        specifier: workspace:*
+        version: link:../contributions
+      '@chema/wallet':
+        specifier: workspace:*
+        version: link:../wallet
 
   packages/ledger:
     dependencies:

@@ -4,6 +4,7 @@ import { buildApp } from './app';
 import { walletCommands } from '@chema/wallet';
 import { parseOrigins } from './cors';
 import { buildContributions, type ContributionsWiring } from './contributions';
+import { buildClaims, type ClaimsWiring } from './fidelity';
 import { chooseOtpProvider } from './otp';
 import { buildPayments, type PaymentsWiring } from './payments';
 import type { WalletWiring } from './wallet-routes';
@@ -60,12 +61,16 @@ if (core) {
 const contributions: ContributionsWiring | undefined =
   core && payments && secrets ? buildContributions(core, payments.service, { secrets, publicBaseUrl }) : undefined;
 
+// P06: Fidelity claim path (mock adapter outside production; flag off by default).
+const claims: ClaimsWiring | undefined = core && secrets ? buildClaims(core, secrets) : undefined;
+
 const app = buildApp({
   ...(db ? { db } : {}),
   ...(core ? { core } : {}),
   ...(payments ? { payments: payments.service } : {}),
   ...(wallets ? { wallets } : {}),
   ...(contributions ? { contributions: contributions.service } : {}),
+  ...(claims ? { claims: claims.service } : {}),
   // Web app origin(s) for CORS; defaults to the public web base URL.
   corsOrigins: parseOrigins(process.env['CHEMA_WEB_ORIGINS'] ?? publicBaseUrl),
   version: process.env['APP_VERSION'] ?? '0.0.0',
@@ -73,6 +78,7 @@ const app = buildApp({
 reportIdleDbError = (err) => app.log.warn({ err }, 'idle database connection lost');
 if (startupWarning) app.log.warn({ reason: startupWarning }, 'core services disabled: only health routes are served');
 if (core) app.log.warn(`${otpChoice.warning}; malware scanning is a MOCK`);
+if (claims) app.log.warn(claims.mock ? 'Fidelity adapter is a MOCK (D14)' : 'Fidelity adapter is the unconfigured stub (D14): claim calls answer 503');
 if (payments) {
   app.log.warn('payment rails are MOCKS; contributions are accepted only into verified ACTIVE wallets');
   if (payments.ephemeralWebhookSecret) app.log.warn('CHEMA_MOCK_WEBHOOK_SECRET unset: mock webhook secret is per-process');
