@@ -7,7 +7,9 @@ const port = Number(process.env['PORT'] ?? 7600);
 const host = process.env['HOST'] ?? '0.0.0.0';
 const databaseUrl = process.env['DATABASE_URL'];
 
-const db = databaseUrl ? createPgClient(databaseUrl) : undefined;
+// Reported through the app logger once it exists (the pool outlives no request).
+let reportIdleDbError: (err: Error) => void = () => undefined;
+const db = databaseUrl ? createPgClient(databaseUrl, 10, (err) => reportIdleDbError(err)) : undefined;
 
 let core: CoreServices | undefined;
 let startupWarning: string | undefined;
@@ -41,6 +43,7 @@ const app = buildApp({
   ...(payments ? { payments: payments.service } : {}),
   version: process.env['APP_VERSION'] ?? '0.0.0',
 });
+reportIdleDbError = (err) => app.log.warn({ err }, 'idle database connection lost');
 if (startupWarning) app.log.warn({ reason: startupWarning }, 'core services disabled: only health routes are served');
 if (core) app.log.warn('OTP delivery and malware scanning are MOCKS (no real provider configured)');
 if (payments) {

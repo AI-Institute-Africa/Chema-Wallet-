@@ -22,7 +22,7 @@ if (!databaseUrl || !redisUrl) {
   process.exit(2);
 }
 
-const db = createPgClient(databaseUrl, 4);
+const db = createPgClient(databaseUrl, 4, (err) => log.warn({ err }, 'idle database connection lost'));
 const blobs = new LocalFsBlobStore(process.env['CHEMA_BLOB_DIR'] ?? '.data/blobs');
 const core = createCoreServices({ db, secrets: loadSecrets(), otp: new MockOtpProvider(), blobs, scanner: new MockMalwareScanner() });
 const queue = new BullMqJobQueue(redisUrl);
