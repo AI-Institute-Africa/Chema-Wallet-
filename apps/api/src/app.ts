@@ -4,6 +4,7 @@ import type { CoreServices } from '@chema/core';
 import type { PaymentService } from '@chema/payments';
 import { createLogger, type SqlClient } from '@chema/shared';
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
+import { registerCors } from './cors';
 import { registerPaymentRoutes } from './payment-routes';
 import { registerRoutes } from './routes';
 import { registerWalletRoutes, type WalletWiring } from './wallet-routes';
@@ -18,6 +19,8 @@ export interface AppOptions {
   payments?: PaymentService;
   /** Wallet lifecycle + verification (P04); needs core. */
   wallets?: WalletWiring;
+  /** Browser origins allowed to call the API (the web app). Empty ⇒ no CORS headers. */
+  corsOrigins?: readonly string[];
 }
 
 const SAFE_REQUEST_ID = /^[A-Za-z0-9._-]{1,64}$/;
@@ -34,6 +37,8 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     loggerInstance: opts.logger ?? (createLogger(process.env['LOG_LEVEL'] ?? 'info') as FastifyBaseLogger),
     genReqId: requestIdFor,
   });
+
+  registerCors(app, opts.corsOrigins ?? []);
 
   app.addHook('onSend', async (req, reply) => {
     reply.header('x-request-id', req.id);

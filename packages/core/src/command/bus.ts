@@ -42,6 +42,12 @@ export interface Command<I, O> {
   readonly name: string;
   /** Load the subject from the database by id. Throw NotFoundError if absent. */
   resolve(q: Queryable, input: I, actor: Actor): Promise<{ action: Action; subject: Subject }>;
+  /**
+   * Optional case-level check the matrix cannot express (e.g. "reviewer holds
+   * no role on this case"). Runs after authorize, in the same transaction.
+   * A non-null reason is a DENIAL: rolled back, audited, ForbiddenError.
+   */
+  guard?(q: Queryable, input: I, actor: Actor, subject: Subject): Promise<string | null>;
   run(tx: CommandTx, input: I, ctx: RunContext): Promise<CommandOutcome<O>>;
 }
 
@@ -97,6 +103,10 @@ export class CommandBus {
         const { action, subject } = resolved;
         const decision = await this.authorizer.authorize(tx, actor, action, subject);
         if (!decision.allowed) throw new Denied(decision.reason, subject.type, subject.id);
+        if (cmd.guard) {
+          const reason = await cmd.guard(tx, input, actor, subject);
+          if (reason !== null) throw new Denied(reason, subject.type, subject.id);
+        }
 
         if (STEP_UP_ACTIONS.has(action)) {
           const ok = ctx.stepUpToken !== undefined && (await this.stepUp.consume(tx, actor, ctx.stepUpToken, action, subject));
