@@ -13,8 +13,18 @@ function wrap(target: pg.Pool | pg.PoolClient): Queryable {
   };
 }
 
-export function createPgClient(connectionString: string, max = 10): SqlClient {
+export function createPgClient(
+  connectionString: string,
+  max = 10,
+  onIdleError: (err: Error) => void = () => undefined,
+): SqlClient {
   const pool = new pg.Pool({ connectionString, max });
+  // An idle pooled connection can die at any time (server restart, failover,
+  // pg_terminate_backend, DROP DATABASE ... WITH (FORCE)). pg re-emits that on
+  // the pool; with no listener Node treats it as an unhandled 'error' and the
+  // process crashes. The pool has already discarded the dead client and the
+  // next query opens a fresh one, so the error only needs reporting.
+  pool.on('error', onIdleError);
   const base = wrap(pool);
   return {
     ...base,
