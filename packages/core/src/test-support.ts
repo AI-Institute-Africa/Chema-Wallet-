@@ -6,6 +6,7 @@ import { insertTestWallet, migratedTestDb } from '@chema/shared/testing';
 import type { Actor, StaffRole, WalletRoleName } from './authz/types';
 import { MemoryBlobStore, MockMalwareScanner } from './documents/store';
 import { MockOtpProvider } from './identity/otp';
+import { issueStepUpGrant, type StepUpTarget } from './identity/sessions';
 import { base32Decode, totp } from './identity/totp';
 import { ephemeralSecrets } from './secrets';
 import { createCoreServices, type CoreServices } from './services';
@@ -20,6 +21,12 @@ export interface Harness extends CoreServices {
   staff(role: StaffRole): Promise<{ actor: Actor; token: string; personId: string; login: string; password: string; secret: string }>;
   totpFor(secret: string): string;
   grantRole(walletId: string, personId: string, role: WalletRoleName): Promise<void>;
+  /**
+   * A step-up grant issued directly for the actor's session (skips the OTP send
+   * limit). Only for race tests that need many live tokens at once; normal
+   * tests use the real startStepUp/verifyStepUp flow.
+   */
+  stepUpGrant(actor: Actor, target: StepUpTarget): Promise<string>;
   assign(staffPersonId: string, walletId: string): Promise<void>;
   close(): Promise<void>;
 }
@@ -81,6 +88,10 @@ export async function createHarness(
       const actor = await core.auth.authenticate(s.token);
       if (!actor) throw new Error('staff session not usable');
       return { actor, token: s.token, personId: enrolled.personId, login, password, secret: enrolled.totpSecret };
+    },
+    async stepUpGrant(actor, target) {
+      if (!actor.sessionId) throw new Error('no session');
+      return (await issueStepUpGrant(db, actor.sessionId, target, clock())).stepUpToken;
     },
     async grantRole(walletId, personId, role) {
       await insertTestWallet(db, walletId);

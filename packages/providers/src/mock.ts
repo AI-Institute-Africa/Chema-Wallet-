@@ -9,7 +9,10 @@
 import { randomUUID } from 'node:crypto';
 import { isCurrency, money, type Money } from '@chema/shared';
 import type {
+  AccountNameLookup,
   AdapterMode,
+  PayoutRequest,
+  PayoutStatus,
   CollectRequest,
   CollectResult,
   ProviderAdapter,
@@ -44,6 +47,19 @@ export interface MockScenario {
   wrongMerchant?: boolean;
   /** Refunds are refused asynchronously (REFUND_FAILED). */
   refundFails?: boolean;
+  /** payout() is refused synchronously by the provider. */
+  payoutReject?: boolean;
+  /** payout() is accepted but the answer never arrives. */
+  payoutTimeout?: boolean;
+}
+
+interface PayoutEntry {
+  providerRef: string;
+  reference: string;
+  amount: Money;
+  destination: string;
+  state: 'PENDING' | 'SUCCEEDED' | 'FAILED' | 'REVERSED';
+  reason?: string;
 }
 
 export interface MockWebhook {
@@ -90,6 +106,11 @@ export class MockRail implements ProviderAdapter {
   private readonly byReference = new Map<string, string>();
   private readonly refunds = new Map<string, { paymentRef: string; amount: Money }>();
   private readonly settlements = new Map<string, SettlementRow[]>();
+  private readonly payouts = new Map<string, PayoutEntry>();
+  private readonly payoutByReference = new Map<string, string>();
+  /** Registered holder names by destination (E.164), for payee verification. */
+  readonly accountNames = new Map<string, string>();
+  readonly payoutCapable: boolean;
   private queue: Queued[] = [];
   private seq = 0;
 
@@ -99,6 +120,7 @@ export class MockRail implements ProviderAdapter {
     this.merchantRef = opts.merchantRef ?? `MERCHANT-${opts.rail}`;
     this.secret = opts.webhookSecret;
     this.checkout = opts.checkout ?? 'PROMPT';
+    this.payoutCapable = this.checkout === 'PROMPT';
     this.clock = opts.clock ?? (() => new Date());
   }
 
@@ -149,10 +171,42 @@ export class MockRail implements ProviderAdapter {
     return parseMockEvent(rawBody);
   }
 
-  async payout(req: { reference: string }): Promise<{ providerRef: string }> {
+  async payout(req: PayoutRequest): Promise<{ providerRef: string }> {
     this.calls.push({ op: 'payout', reference: req.reference });
     if (this.scenario.outage) throw new ProviderUnavailableError('mock outage');
-    return { providerRef: `${this.rail}-PO-${++this.seq}` };
+    if (!this.payoutCapable) throw new ProviderRejectedError('rail cannot pay out');
+    if (this.scenario.payoutReject) throw new ProviderRejectedError('mock payout reject');
+    // Same reference ⇒ same payout (provider-side idempotency).
+    let ref = this.payoutByReference.get(req.reference);
+    if (!ref) {
+      ref = `${this.rail}-PO-${++this.seq}`;
+      this.payouts.set(ref, { providerRef: ref, reference: req.reference, amount: req.amount, destination: req.destination, state: 'PENDING' });
+      this.payoutByReference.set(req.reference, ref);
+    }
+    if (this.scenario.payoutTimeout) throw new ProviderTimeoutError();
+    return { providerRef: ref };
+  }
+
+  async queryPayout(q: { providerRef?: string; reference: string }): Promise<PayoutStatus> {
+    if (this.scenario.outage) throw new ProviderUnavailableError('mock outage');
+    const ref = q.providerRef ?? this.payoutByReference.get(q.reference);
+    const p = ref ? this.payouts.get(ref) : undefined;
+    if (!p) return { state: 'NOT_FOUND' };
+    switch (p.state) {
+      case 'PENDING':
+        return { state: 'PENDING', providerRef: p.providerRef };
+      case 'SUCCEEDED':
+        return { state: 'SUCCEEDED', providerRef: p.providerRef, amount: p.amount };
+      case 'FAILED':
+        return { state: 'FAILED', providerRef: p.providerRef, reason: p.reason ?? 'failed' };
+      case 'REVERSED':
+        return { state: 'REVERSED', providerRef: p.providerRef, reason: p.reason ?? 'reversed' };
+    }
+  }
+
+  async lookupAccountName(destination: string): Promise<AccountNameLookup> {
+    if (this.scenario.outage) throw new ProviderUnavailableError('mock outage');
+    return { name: this.accountNames.get(destination) ?? null };
   }
 
   async refund(q: { providerRef: string; amount: Money; reference: string }): Promise<RefundResult> {
@@ -218,6 +272,32 @@ export class MockRail implements ProviderAdapter {
 
   winDispute(providerRef: string, disputeRef: string): void {
     this.emit('DISPUTE_WON', this.mustGet(providerRef), { disputeRef });
+  }
+
+  /** Provider back office: the payout reached the payee. */
+  payoutSucceed(providerRef: string): void {
+    this.payoutSet(providerRef, 'SUCCEEDED', 'PAYOUT_SUCCEEDED');
+  }
+
+  payoutFail(providerRef: string, reason = 'recipient wallet rejected'): void {
+    this.payoutSet(providerRef, 'FAILED', 'PAYOUT_FAILED', reason);
+  }
+
+  payoutReverse(providerRef: string, reason = 'returned by recipient network'): void {
+    this.payoutSet(providerRef, 'REVERSED', 'PAYOUT_REVERSED', reason);
+  }
+
+  payoutRefFor(reference: string): string | undefined {
+    return this.payoutByReference.get(reference);
+  }
+
+  private payoutSet(providerRef: string, state: PayoutEntry['state'], type: ProviderEventType, reason?: string): void {
+    const p = this.payouts.get(providerRef);
+    if (!p) throw new Error(`mock ${this.rail}: unknown payout ${providerRef}`);
+    p.state = state;
+    if (reason) p.reason = reason;
+    const entry: BookEntry = { providerRef, reference: p.reference, amount: p.amount, state: 'SUCCEEDED' };
+    this.emit(type, entry, { amount: p.amount, ...(reason ? { reason } : {}) });
   }
 
   /** Money the provider settled to us that we may know nothing about. */

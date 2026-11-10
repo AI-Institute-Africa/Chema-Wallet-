@@ -69,6 +69,8 @@ export interface Subject {
   /** Who created the underlying case/record (agents can't check their own work). */
   createdByPersonId?: string;
   amountMinor?: bigint;
+  /** For approvals: the staff role an unavailable-approver escalation went to. */
+  escalatedTo?: StaffRole;
 }
 
 /** Actor ↔ subject relationships loaded from the database. */

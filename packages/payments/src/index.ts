@@ -31,3 +31,4 @@ export {
 export { SETTLEMENT_LAG_DAYS, type ReconSummary } from './recon';
 export type { RefundInput, RefundResultView } from './refunds';
 export { PaymentService, listExceptions, type PaymentServiceDeps, type ReconExceptionView } from './service';
+export { PAYOUT_EVENT_TOPIC } from './events';

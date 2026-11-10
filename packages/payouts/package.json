@@ -1,0 +1,24 @@
+{
+  "name": "@chema/payouts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Payouts, governance (cases, holds, mandate changes), refunds/cancellation and closure (P07)",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/test-support.ts"
+  },
+  "dependencies": {
+    "@chema/channels": "workspace:*",
+    "@chema/core": "workspace:*",
+    "@chema/ledger": "workspace:*",
+    "@chema/payments": "workspace:*",
+    "@chema/providers": "workspace:*",
+    "@chema/shared": "workspace:*",
+    "@chema/wallet": "workspace:*"
+  },
+  "devDependencies": {
+    "@chema/contributions": "workspace:*",
+    "@chema/fidelity": "workspace:*"
+  }
+}

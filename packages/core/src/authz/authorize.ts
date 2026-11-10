@@ -100,6 +100,17 @@ function check(rule: Rule, input: AuthzInput): string | null {
       if (subject.amountMinor === undefined) return 'NO_AMOUNT';
       return subject.amountMinor > input.payoutHighValueMinor ? null : 'BELOW_THRESHOLD';
     }
+    case 'checker_escalated': {
+      const base = check('checker', input);
+      if (base) return base;
+      if (subject.escalatedTo === undefined) return 'NOT_ESCALATED';
+      return actor.kind === 'STAFF' && actor.staffRole === subject.escalatedTo ? null : 'ESCALATED_ELSEWHERE';
+    }
+    case 'checker_threshold_or_escalated': {
+      const threshold = check('checker_above_threshold', input);
+      if (threshold === null) return null;
+      return subject.escalatedTo === undefined ? threshold : check('checker_escalated', input);
+    }
   }
 }
 

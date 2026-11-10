@@ -55,6 +55,9 @@ importers:
       '@chema/payments':
         specifier: workspace:*
         version: link:../../packages/payments
+      '@chema/payouts':
+        specifier: workspace:*
+        version: link:../../packages/payouts
       '@chema/providers':
         specifier: workspace:*
         version: link:../../packages/providers
@@ -193,6 +196,37 @@ importers:
       '@chema/shared':
         specifier: workspace:*
         version: link:../shared
+
+  packages/payouts:
+    dependencies:
+      '@chema/channels':
+        specifier: workspace:*
+        version: link:../channels
+      '@chema/core':
+        specifier: workspace:*
+        version: link:../core
+      '@chema/ledger':
+        specifier: workspace:*
+        version: link:../ledger
+      '@chema/payments':
+        specifier: workspace:*
+        version: link:../payments
+      '@chema/providers':
+        specifier: workspace:*
+        version: link:../providers
+      '@chema/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@chema/wallet':
+        specifier: workspace:*
+        version: link:../wallet
+    devDependencies:
+      '@chema/contributions':
+        specifier: workspace:*
+        version: link:../contributions
+      '@chema/fidelity':
+        specifier: workspace:*
+        version: link:../fidelity
 
   packages/providers:
     dependencies:

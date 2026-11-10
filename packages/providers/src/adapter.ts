@@ -49,6 +49,11 @@ export const PROVIDER_EVENT_TYPES = [
   'DISPUTE_OPENED',
   'DISPUTE_WON',
   'CHARGEBACK',
+  // Payouts (P07). Callbacks are triggers only: the payouts service re-reads
+  // the payout with queryPayout() before acting on it.
+  'PAYOUT_SUCCEEDED',
+  'PAYOUT_FAILED',
+  'PAYOUT_REVERSED',
 ] as const;
 export type ProviderEventType = (typeof PROVIDER_EVENT_TYPES)[number];
 
@@ -77,9 +82,24 @@ export interface RefundResult {
 }
 
 export interface PayoutRequest {
+  /** Our payout id. The provider must treat a repeated reference as the same payout. */
   reference: string;
   amount: Money;
+  /** Payee wallet/phone (E.164). */
   destination: string;
+}
+
+export type PayoutStatus =
+  | { state: 'PENDING'; providerRef: string }
+  | { state: 'SUCCEEDED'; providerRef: string; amount: Money }
+  | { state: 'FAILED'; providerRef?: string; reason: string }
+  /** Paid, then returned by the provider (e.g. recipient account closed). */
+  | { state: 'REVERSED'; providerRef: string; reason: string }
+  | { state: 'NOT_FOUND' };
+
+/** Registered holder name for a destination, or null when the provider cannot say. */
+export interface AccountNameLookup {
+  name: string | null;
 }
 
 export interface SettlementRow {
@@ -102,6 +122,11 @@ export interface ProviderAdapter {
   /** Verify signature + timestamp window; return the normalised event or throw WebhookRejectedError. */
   verifyWebhook(headers: Readonly<Record<string, string | undefined>>, rawBody: string, now: Date): ProviderEvent;
   payout(req: PayoutRequest): Promise<{ providerRef: string }>;
+  queryPayout(q: { providerRef?: string; reference: string }): Promise<PayoutStatus>;
+  /** Registered account-holder name (payee verification, docs/08). */
+  lookupAccountName(destination: string): Promise<AccountNameLookup>;
+  /** Can this rail send money out at all (mobile money: yes; card: no)? */
+  readonly payoutCapable: boolean;
   refund(q: { providerRef: string; amount: Money; reference: string }): Promise<RefundResult>;
   /** Settlement rows for one calendar day (YYYY-MM-DD, provider time zone). */
   settlementReport(date: string): Promise<SettlementRow[]>;

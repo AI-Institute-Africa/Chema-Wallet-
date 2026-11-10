@@ -26,7 +26,8 @@ export interface PublicPage {
   share: ShareLinks;
   photoPath: string | null;
   totals: { raised: MoneyJSON; target: MoneyJSON | null } | null;
-  usage: { paidOut: MoneyJSON } | null;
+  closed: boolean;
+  usage: { paidOut: MoneyJSON; byPurpose: { purpose: string; amount: MoneyJSON }[] } | null;
   tributes: PublicTribute[] | null;
   contribute: { currency: 'USD' | 'ZWG'; rails: string[]; min: MoneyJSON; max: MoneyJSON | null; groupsEnabled: boolean };
 }

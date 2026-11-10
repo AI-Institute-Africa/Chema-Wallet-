@@ -36,7 +36,11 @@ export type Rule =
   /** Checker: not the maker, not the creator. */
   | 'checker'
   /** Checker only when amount > approvals.payout_high_value_minor (unset ⇒ never). */
-  | 'checker_above_threshold';
+  | 'checker_above_threshold'
+  /** Checker only on an approval escalated to the actor's staff role (unavailable approver, docs/02). */
+  | 'checker_escalated'
+  /** checker_above_threshold OR checker_escalated. */
+  | 'checker_threshold_or_escalated';
 
 export const ACTIONS = [
   'wallet.create_draft',
@@ -97,6 +101,31 @@ export const ACTIONS = [
   'claim.process',
   'claim.route.unblock',
   'claim.route.unblock.approve',
+  // P07 payouts, governance, closure (docs/08).
+  'payee.view',
+  'payout.view',
+  'payout.cancel',
+  'payout.process',
+  'payout.override',
+  'payout.override.approve',
+  'approval.escalate',
+  'mandate.change',
+  'mandate.change.approve',
+  'mandate.verify',
+  'mandate.execute',
+  'case.open',
+  'case.view',
+  'case.assign',
+  'case.update',
+  'case.resolve',
+  'case.process',
+  'hold.place',
+  'hold.release',
+  'hold.release.approve',
+  'wallet.close',
+  'wallet.close.finalise',
+  'wallet.thank_contributors',
+  'wallet.statement.view',
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -159,11 +188,13 @@ export const MATRIX: Readonly<Record<Action, Cells>> = {
   },
   // agent: NO (never requests, never self-approves)
   'payout.request': { admin: 'maker' },
-  'payout.approve': { approver: 'checker', opsfin: 'checker_above_threshold' },
+  // Unavailable family approver => the maker escalates; the escalated approval is
+  // checked by a distinct OPS_FINANCE (money) or FIDELITY_ADMIN (authority) person.
+  'payout.approve': { approver: 'checker', opsfin: 'checker_threshold_or_escalated' },
   'wallet.change_payout_destination': { admin: 'maker', approver: 'maker' },
-  'wallet.change_payout_destination.approve': { admin: 'checker', approver: 'checker' },
+  'wallet.change_payout_destination.approve': { admin: 'checker', approver: 'checker', opsfin: 'checker_escalated' },
   'wallet.replace_admin': { admin: 'maker', approver: 'maker' },
-  'wallet.replace_admin.approve': { admin: 'checker', approver: 'checker' },
+  'wallet.replace_admin.approve': { admin: 'checker', approver: 'checker', fidelity_admin: 'checker_escalated' },
   // Staff see assigned cases only (docs/02 Staff).
   'claim.decide': { claims: 'assigned' },
   'ledger.adjust': { opsfin: 'maker' },
@@ -238,6 +269,46 @@ export const MATRIX: Readonly<Record<Action, Cells>> = {
   // ops/finance checks it. Never unblocked by inference.
   'claim.route.unblock': { claims: 'maker' },
   'claim.route.unblock.approve': { opsfin: 'checker' },
+  // -- P07 (docs/08) --
+  'payee.view': { admin: 'allow', approver: 'allow', opsfin: 'allow', auditor: 'allow', fidelity_admin: 'allow' },
+  'payout.view': {
+    admin: 'allow',
+    approver: 'allow',
+    agent: 'assigned',
+    claims: 'assigned',
+    opsfin: 'allow',
+    auditor: 'allow',
+    fidelity_admin: 'allow',
+  },
+  // Admin cancels own unsubmitted requests (guard); ops/finance for stuck ones.
+  'payout.cancel': { admin: 'allow', opsfin: 'allow' },
+  'payout.process': { system: 'allow' },
+  // Rail down: ops records a payment made outside the rail; another ops person checks it.
+  'payout.override': { opsfin: 'maker' },
+  'payout.override.approve': { opsfin: 'checker' },
+  // Only the maker of the approval (owner = maker) may escalate it.
+  'approval.escalate': { contributor: 'own' },
+  // Approvers are part of the mandate (docs/02): dual + verifier re-check.
+  'mandate.change': { admin: 'maker', approver: 'maker' },
+  'mandate.change.approve': { admin: 'checker', approver: 'checker', fidelity_admin: 'checker_escalated' },
+  'mandate.verify': { verifier: 'assigned_not_own_case' },
+  // The requester runs the approved change (checked in the guard).
+  'mandate.execute': { admin: 'allow', approver: 'allow' },
+  'case.open': { admin: 'allow', approver: 'allow', claims: 'assigned', opsfin: 'allow', fidelity_admin: 'allow' },
+  'case.view': { admin: 'allow', approver: 'allow', claims: 'assigned', opsfin: 'allow', auditor: 'allow', fidelity_admin: 'allow' },
+  'case.assign': { opsfin: 'allow', fidelity_admin: 'allow' },
+  // Notes / evidence / escalation by the assigned case owner (guard).
+  'case.update': { claims: 'assigned', opsfin: 'allow', fidelity_admin: 'allow' },
+  'case.resolve': { claims: 'assigned', opsfin: 'allow', fidelity_admin: 'allow' },
+  'case.process': { system: 'allow' },
+  // Placing a hold is protective (one person, written reason); releasing is dual.
+  'hold.place': { claims: 'assigned', opsfin: 'allow', fidelity_admin: 'allow' },
+  'hold.release': { opsfin: 'maker', fidelity_admin: 'maker' },
+  'hold.release.approve': { opsfin: 'checker', fidelity_admin: 'checker' },
+  'wallet.close': { admin: 'allow', fidelity_admin: 'allow' },
+  'wallet.close.finalise': { admin: 'allow', opsfin: 'allow', fidelity_admin: 'allow' },
+  'wallet.thank_contributors': { admin: 'allow' },
+  'wallet.statement.view': { admin: 'allow', approver: 'allow', opsfin: 'allow', auditor: 'allow', fidelity_admin: 'allow' },
 };
 
 /** Actions that need a fresh step-up grant (docs/02 Step-up). */
@@ -245,6 +316,7 @@ export const STEP_UP_ACTIONS: ReadonlySet<Action> = new Set<Action>([
   'payout.request',
   'wallet.change_payout_destination',
   'wallet.replace_admin',
+  'mandate.change',
 ]);
 
 /** The checker action for each maker action. */
@@ -256,4 +328,15 @@ export const CHECKER_ACTION: Readonly<Partial<Record<Action, Action>>> = {
   'config.change': 'config.change.approve',
   'payment.refund': 'payment.refund.approve',
   'claim.route.unblock': 'claim.route.unblock.approve',
+  'payout.override': 'payout.override.approve',
+  'mandate.change': 'mandate.change.approve',
+  'hold.release': 'hold.release.approve',
+};
+
+/** Who an unavailable-approver escalation goes to, per maker action. */
+export const ESCALATION_ROLE: Readonly<Partial<Record<Action, 'OPS_FINANCE' | 'FIDELITY_ADMIN'>>> = {
+  'payout.request': 'OPS_FINANCE',
+  'wallet.change_payout_destination': 'OPS_FINANCE',
+  'wallet.replace_admin': 'FIDELITY_ADMIN',
+  'mandate.change': 'FIDELITY_ADMIN',
 };

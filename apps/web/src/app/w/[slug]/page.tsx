@@ -10,6 +10,20 @@ import LiveTotal from './live-total';
 
 export const dynamic = 'force-dynamic';
 
+const PURPOSE_KEYS = {
+  PARLOUR: 'payout.purpose.parlour',
+  TRANSPORT: 'payout.purpose.transport',
+  FOOD: 'payout.purpose.food',
+  CHURCH: 'payout.purpose.church',
+  FAMILY_BENEFICIARY: 'payout.purpose.family_beneficiary',
+  OTHER_APPROVED: 'payout.purpose.other_approved',
+} as const;
+
+function purposeLabel(purpose: string): string {
+  const key = PURPOSE_KEYS[purpose as keyof typeof PURPOSE_KEYS];
+  return key ? t(key) : t('payout.purpose.other_approved');
+}
+
 const client = createPublicClient({ baseUrl: SERVER_API_BASE });
 
 async function load(slug: string): Promise<PublicPage> {
@@ -41,8 +55,22 @@ export default async function FuneralPage({ params }: { params: Promise<{ slug: 
 
       {p.totals && <LiveTotal slug={slug} initial={p.totals} />}
       {p.usage && <p className="muted">{t('page.paid_out', { amount: formatMoney(p.usage.paidOut) })}</p>}
+      {p.usage && p.usage.byPurpose.length > 0 && (
+        <>
+          <h2>{t('page.usage.title')}</h2>
+          <ul className="plain">
+            {p.usage.byPurpose.map((u) => (
+              <li key={u.purpose}>
+                {purposeLabel(u.purpose)}: {formatMoney(u.amount)}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
 
-      {open ? (
+      {p.closed ? (
+        <p className="card">{t('page.closed')}</p>
+      ) : open ? (
         <Link className="button big" href={`/w/${slug}/give`}>
           {t('page.contribute')}
         </Link>
@@ -50,11 +78,15 @@ export default async function FuneralPage({ params }: { params: Promise<{ slug: 
         <p className="muted">{t('error.feature_disabled')}</p>
       )}
 
-      <h2>{t('page.share')}</h2>
-      <p>
-        <a href={p.share.whatsapp}>WhatsApp</a> · <a href={p.share.sms}>SMS</a> · <a href={p.share.facebook}>Facebook</a>
-      </p>
-      <img className="qr" src={`${API_BASE}/public/wallets/${slug}/qr.svg`} alt="QR code for this page" />
+      {!p.closed && (
+        <>
+          <h2>{t('page.share')}</h2>
+          <p>
+            <a href={p.share.whatsapp}>WhatsApp</a> · <a href={p.share.sms}>SMS</a> · <a href={p.share.facebook}>Facebook</a>
+          </p>
+          <img className="qr" src={`${API_BASE}/public/wallets/${slug}/qr.svg`} alt="QR code for this page" />
+        </>
+      )}
 
       {p.tributes && (
         <>
@@ -71,9 +103,11 @@ export default async function FuneralPage({ params }: { params: Promise<{ slug: 
         </>
       )}
 
-      <p className="small">
-        <Link href={`/w/${slug}/report`}>{t('page.report')}</Link>
-      </p>
+      {!p.closed && (
+        <p className="small">
+          <Link href={`/w/${slug}/report`}>{t('page.report')}</Link>
+        </p>
+      )}
     </main>
   );
 }

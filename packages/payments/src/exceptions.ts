@@ -77,7 +77,15 @@ export async function raiseException(q: Queryable, input: RaiseInput, now: Date)
   return { id: existing.rows[0]?.id ?? '', created: false };
 }
 
-export type CaseType = 'CHARGEBACK' | 'REFUND' | 'RECON' | 'BENEFICIARY_MISMATCH';
+export type CaseType =
+  | 'CHARGEBACK'
+  | 'REFUND'
+  | 'RECON'
+  | 'FRAUD'
+  | 'BENEFICIARY_MISMATCH'
+  | 'AUTHORITY_DISPUTE'
+  | 'PAYMENT_DISPUTE'
+  | 'PROVIDER_DISPUTE';
 
 export async function openCase(
   q: Queryable,
