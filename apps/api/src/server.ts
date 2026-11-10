@@ -1,7 +1,9 @@
-import { createCoreServices, LocalFsBlobStore, loadSecrets, MockMalwareScanner, MockOtpProvider, type CoreServices } from '@chema/core';
+import { createCoreServices, LocalFsBlobStore, loadSecrets, MockMalwareScanner, type CoreServices } from '@chema/core';
 import { createPgClient } from '@chema/shared';
 import { buildApp } from './app';
 import { walletCommands } from '@chema/wallet';
+import { parseOrigins } from './cors';
+import { chooseOtpProvider } from './otp';
 import { buildPayments, type PaymentsWiring } from './payments';
 import type { WalletWiring } from './wallet-routes';
 
@@ -13,6 +15,7 @@ const databaseUrl = process.env['DATABASE_URL'];
 let reportIdleDbError: (err: Error) => void = () => undefined;
 const db = databaseUrl ? createPgClient(databaseUrl, 10, (err) => reportIdleDbError(err)) : undefined;
 
+const otpChoice = chooseOtpProvider(process.env);
 let core: CoreServices | undefined;
 let startupWarning: string | undefined;
 if (db) {
@@ -20,8 +23,9 @@ if (db) {
     core = createCoreServices({
       db,
       secrets: loadSecrets(),
-      // Real SMS/WhatsApp OTP delivery is decision D16 (channel.* flags); until then codes go nowhere.
-      otp: new MockOtpProvider(),
+      // Real SMS/WhatsApp OTP delivery is decision D16 (channel.* flags); until then codes go
+      // nowhere, or to CHEMA_DEV_OTP_FILE on a developer machine (refused in production).
+      otp: otpChoice.provider,
       blobs: new LocalFsBlobStore(process.env['CHEMA_BLOB_DIR'] ?? '.data/blobs'),
       scanner: new MockMalwareScanner(),
     });
@@ -55,11 +59,13 @@ const app = buildApp({
   ...(core ? { core } : {}),
   ...(payments ? { payments: payments.service } : {}),
   ...(wallets ? { wallets } : {}),
+  // Web app origin(s) for CORS; defaults to the public web base URL.
+  corsOrigins: parseOrigins(process.env['CHEMA_WEB_ORIGINS'] ?? publicBaseUrl),
   version: process.env['APP_VERSION'] ?? '0.0.0',
 });
 reportIdleDbError = (err) => app.log.warn({ err }, 'idle database connection lost');
 if (startupWarning) app.log.warn({ reason: startupWarning }, 'core services disabled: only health routes are served');
-if (core) app.log.warn('OTP delivery and malware scanning are MOCKS (no real provider configured)');
+if (core) app.log.warn(`${otpChoice.warning}; malware scanning is a MOCK`);
 if (payments) {
   app.log.warn('payment rails are MOCKS; contributions are accepted only into verified ACTIVE wallets');
   if (payments.ephemeralWebhookSecret) app.log.warn('CHEMA_MOCK_WEBHOOK_SECRET unset: mock webhook secret is per-process');

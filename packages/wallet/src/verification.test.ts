@@ -290,6 +290,11 @@ describe('§V rejection + appeal', () => {
         { actor },
       );
     await expect(approve(verifier.actor)).rejects.toThrow(/APPEAL_SAME_REVIEWER/);
+    const { rows: denied } = await t.h.db.query<{ reason_code: string }>(
+      "SELECT reason_code FROM audit_log WHERE action = 'verification.decide' AND subject_id = $1 AND authz_result = 'DENIED'",
+      [appealed.caseId],
+    );
+    expect(denied.map((d) => d.reason_code)).toEqual(['APPEAL_SAME_REVIEWER']);
     const second = await t.verifier();
     await t.assignVerifier(walletId, second.personId);
     await expect(approve(second.actor)).resolves.toMatchObject({ status: 'ACTIVE' });
@@ -405,6 +410,11 @@ describe('§V verifier ≠ creator', () => {
     await expect(
       t.h.bus.execute(t.w.decide, { caseId, outcome: 'APPROVED', reasonCode: 'EVIDENCE_SUFFICIENT', checklist: ALL_PASS }, { actor: verifier.actor }),
     ).rejects.toThrow(/REVIEWER_IS_PARTY/);
+    const { rows: audit } = await t.h.db.query<{ authz_result: string; reason_code: string; actor_id: string }>(
+      "SELECT authz_result, reason_code, actor_id FROM audit_log WHERE action = 'verification.decide' AND subject_id = $1",
+      [caseId],
+    );
+    expect(audit).toEqual([{ authz_result: 'DENIED', reason_code: 'REVIEWER_IS_PARTY', actor_id: verifier.personId }]);
     await expect(
       t.h.db.query(
         `UPDATE verification_case SET reviewer = $2, checklist = '{}'::jsonb, outcome = 'APPROVED', reason_code = 'EVIDENCE_SUFFICIENT', decided_at = now() WHERE id = $1`,

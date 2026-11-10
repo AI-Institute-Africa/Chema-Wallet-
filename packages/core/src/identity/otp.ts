@@ -27,6 +27,22 @@ export class MockOtpProvider implements OtpProvider {
   }
 }
 
+/**
+ * LOCAL DEVELOPMENT ONLY: "delivers" each code by appending a line to a file
+ * (mode 0600) so a developer can sign in to the web app before a real SMS /
+ * WhatsApp provider exists (D16). Never the app log. The API refuses to use it
+ * when NODE_ENV=production (see apps/api/src/otp.ts).
+ */
+export class DevFileOtpProvider implements OtpProvider {
+  constructor(readonly path: string) {}
+
+  async send(to: { phoneE164: string; via: OtpDelivery }, code: string): Promise<void> {
+    const { appendFile } = await import('node:fs/promises');
+    const line = JSON.stringify({ ts: new Date().toISOString(), phone: to.phoneE164, via: to.via, code });
+    await appendFile(this.path, `${line}\n`, { mode: 0o600 });
+  }
+}
+
 export function newOtpCode(): string {
   return randomInt(0, 1_000_000).toString().padStart(6, '0');
 }

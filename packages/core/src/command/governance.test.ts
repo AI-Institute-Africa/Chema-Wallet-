@@ -112,6 +112,35 @@ describe('CommandBus', () => {
     expect((await auditFor(walletId)).filter((r) => r.action === 'payout.request')).toEqual([]);
   });
 
+  it('a command guard denial is audited, runs after authorize, and the handler never runs', async () => {
+    const { walletId, admin } = await familyWallet();
+    let ran = false;
+    const guarded: Command<{ walletId: string; deny: boolean }, string> = {
+      name: 'test.guarded',
+      async resolve(_q, input) {
+        return { action: 'consent.manage', subject: { type: 'wallet', id: input.walletId, ownerPersonId: admin.personId } };
+      },
+      async guard(_q, input) {
+        return input.deny ? 'CASE_PARTY' : null;
+      },
+      async run() {
+        ran = true;
+        return { result: 'ok' };
+      },
+    };
+    await expect(h.bus.execute(guarded, { walletId, deny: true }, { actor: admin.actor })).rejects.toMatchObject({ reason: 'CASE_PARTY' });
+    expect(ran).toBe(false);
+    // Unauthorised actor: the matrix denial wins; the guard is not consulted.
+    const outsider = await h.customer();
+    await expect(h.bus.execute(guarded, { walletId, deny: true }, { actor: outsider.actor })).rejects.toMatchObject({ reason: 'NOT_OWNER' });
+    await expect(h.bus.execute(guarded, { walletId, deny: false }, { actor: admin.actor })).resolves.toBe('ok');
+    expect((await auditFor(walletId)).map((r) => `${r.authz_result}:${r.reason_code ?? ''}`)).toEqual([
+      'DENIED:CASE_PARTY',
+      'DENIED:NOT_OWNER',
+      'ALLOWED:',
+    ]);
+  });
+
   it('NOT_FOUND is audited as a denial (IDOR probing is visible)', async () => {
     const c = await h.customer();
     const ghost = randomUUID();

@@ -5,7 +5,6 @@
 import { randomUUID } from 'node:crypto';
 import {
   ConflictError,
-  ForbiddenError,
   NotFoundError,
   RateLimitedError,
   ValidationError,
@@ -684,6 +683,16 @@ export function walletCommands(deps: WalletDeps) {
         subject: { type: 'verification_case', id: c.id, walletId: w.id, createdByPersonId: w.created_by },
       };
     },
+    // Reviewer ≠ creator ≠ agent ≠ admin (docs/05). Authz covers creator + family roles of
+    // the session; this covers every other link to the case, and is audited as a denial.
+    async guard(q, input, actor) {
+      const c = await loadCase(q, input.caseId);
+      const w = await loadWallet(q, c.wallet_id);
+      if (await isParty(q, actor.personId, w, c)) return 'REVIEWER_IS_PARTY';
+      // Appeal route: a different reviewer than the one who rejected.
+      if (c.appeal_of && (await loadCase(q, c.appeal_of)).reviewer === actor.personId) return 'APPEAL_SAME_REVIEWER';
+      return null;
+    },
     async run(tx, input, { actor }) {
       if (!includes(VERIFICATION_OUTCOMES, input.outcome)) throw new ValidationError('unknown outcome');
       if (!includes(VERIFICATION_REASON_CODES, input.reasonCode)) throw new ValidationError('unknown reason code');
@@ -704,13 +713,7 @@ export function walletCommands(deps: WalletDeps) {
       if (c.outcome !== null) throw new ConflictError('CASE_CLOSED');
       const w = await loadWallet(tx, c.wallet_id, true);
       if (w.status !== 'PENDING_VERIFICATION') throw new ConflictError('WALLET_NOT_PENDING');
-      // Reviewer ≠ creator ≠ agent ≠ admin (docs/05). Authz covers creator + family roles; this covers the rest.
-      if (await isParty(tx, actor.personId, w, c)) throw new ForbiddenError('REVIEWER_IS_PARTY');
-      // Appeal route: a different reviewer than the one who rejected.
-      if (c.appeal_of) {
-        const prior = await loadCase(tx, c.appeal_of);
-        if (prior.reviewer === actor.personId) throw new ForbiddenError('APPEAL_SAME_REVIEWER');
-      }
+      // Party checks ran in guard() (audited denial); verification_case_reviewer_guard re-checks at write time.
       if (input.outcome === 'APPROVED') {
         const { rows } = await tx.query('SELECT 1 FROM fraud_flag WHERE wallet_id = $1 AND reviewed_at IS NULL', [w.id]);
         if (rows.length > 0) throw new ConflictError('OPEN_FRAUD_FLAGS');
