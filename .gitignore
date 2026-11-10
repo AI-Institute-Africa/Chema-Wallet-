@@ -7,3 +7,6 @@ coverage/
 *.log
 .DS_Store
 .next/
+
+# Local document blob store (ciphertext only, still never commit)
+.data/

@@ -45,6 +45,35 @@ describe('maskDeep', () => {
       password: REDACTED,
     });
   });
+
+  it('redacts P01 auth fields (OTP codes, session/step-up tokens, TOTP, key material)', () => {
+    const input = {
+      otpCode: '123456',
+      totp: '654321',
+      sessionToken: 'abc',
+      stepUpToken: 'def',
+      totpSecret: 'JBSWY3DP',
+      newPassword: 'pw',
+      code_hash: 'h',
+      key_wrap: 'k',
+      dataBase64: 'JVBERi0',
+      challengeId: 'c-1',
+      authzResult: 'ALLOWED',
+    };
+    expect(maskDeep(input)).toEqual({
+      otpCode: REDACTED,
+      totp: REDACTED,
+      sessionToken: REDACTED,
+      stepUpToken: REDACTED,
+      totpSecret: REDACTED,
+      newPassword: REDACTED,
+      code_hash: REDACTED,
+      key_wrap: REDACTED,
+      dataBase64: REDACTED,
+      challengeId: 'c-1',
+      authzResult: 'ALLOWED',
+    });
+  });
 });
 
 describe('logger', () => {
@@ -81,6 +110,6 @@ describe('logger', () => {
     createLogger('info', stream).info({ req: new Req() }, 'incoming');
     const out = lines.join('');
     expect(out).toContain('"method":"POST"');
-    expect(out).toContain('"url":"/x?msisdn=***567"');
+    expect(out).toContain('"url":"/x?msisdn=[REDACTED]"');
   });
 });

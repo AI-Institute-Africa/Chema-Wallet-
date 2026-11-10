@@ -2,8 +2,10 @@
 // Two layers: sensitive KEYS are fully redacted; free-text VALUES have
 // emails, phone/account/card-like digit runs and bearer tokens masked.
 
+// Exact names, plus anything ending in token/secret/password (stepUpToken,
+// totpSecret, newPassword...) — P01 auth adds many such fields.
 const SENSITIVE_KEY =
-  /^(password|passwd|pass|pin|otp|cvv|cvc|secret|token|access_token|refresh_token|api_?key|authorization|cookie|set-cookie|card(_?number)?|pan|id_?number|national_?id)$/i;
+  /^(password|passwd|pass|pin|otp|totp|otp_?code|cvv|cvc|secret|token|access_token|refresh_token|api_?key|authorization|cookie|set-cookie|card(_?number)?|pan|id_?number|national_?id|code_?hash|password_?hash|totp_?secret_?enc|key_?wrap|data_?base64)$|(token|secret|password)$/i;
 
 export const REDACTED = '[REDACTED]';
 

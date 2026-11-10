@@ -18,8 +18,14 @@ interface ErrLike {
   stack?: unknown;
 }
 
-/** Decode %-escapes first so encoded PII (%2B263...) is masked too. */
-function maskUrl(url: string): string {
+/**
+ * Query-string VALUES are always redacted (tokens/codes must never be logged,
+ * even if a client wrongly puts them in a URL); keys are kept for debugging.
+ * The path is %-decoded first so encoded PII (%2B263...) is masked too.
+ */
+function maskUrl(raw: string): string {
+  const q = raw.indexOf('?');
+  const url = q < 0 ? raw : raw.slice(0, q) + '?' + raw.slice(q + 1).replace(/=[^&#]*/g, '=[REDACTED]');
   let decoded = url;
   try {
     decoded = decodeURIComponent(url.replace(/\+/g, ' '));

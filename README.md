@@ -11,19 +11,22 @@ Node 22+, pnpm 10 (`npm i -g pnpm@10.33.0`), Docker (only to run the stack; test
 pnpm install            # never `npm install` in this workspace
 pnpm verify             # typecheck + lint + test + secret scan (what CI runs)
 pnpm test               # vitest; Postgres via in-process PGlite
-docker compose up -d --build   # postgres:55432, redis:56379, api:7600
+cp .env.example .env    # then set CHEMA_AUTH_SECRET / CHEMA_DATA_KEY (openssl rand -base64 32)
+docker compose up -d --build   # postgres:55432, redis:56379, api:7600, worker
 curl localhost:7600/health     # liveness; /health/ready checks the DB
 pnpm db:migrate         # apply db/migrations to $DATABASE_URL
+pnpm audit:verify       # check the audit_log hash chain in $DATABASE_URL
+pnpm dev:worker         # outbox relay + job worker (needs REDIS_URL)
 docker compose down
 ```
 
 ## Layout
 `apps/api` Fastify API · `apps/web`, `apps/admin` (later phases) ·
 `packages/shared` Money, db + migrator, log masking, i18n ·
-`packages/core` flags/config · `packages/ledger|providers|channels|fidelity` (later phases) ·
+`packages/core` identity, authz matrix, command bus, approvals, audit chain, consent, documents, outbox, flags · `packages/ledger|providers|channels|fidelity` (later phases) ·
 `db/migrations` plain SQL, checksum-verified · `tools/eslint-plugin-chema` invariant lint rules.
 
 ## Safety defaults
 Every flag in `packages/core/src/flags/registry.ts` defaults to disabled/unset.
-`live_funds.enabled=false`: no real money. Financial flags cannot be changed until
-dual approval exists (P01/P09). `commissions.enabled` is locked off.
+`live_funds.enabled=false`: no real money. Financial flags change only through a
+maker-checker approval. `commissions.enabled` is locked off.
