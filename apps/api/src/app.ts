@@ -6,6 +6,7 @@ import { createLogger, type SqlClient } from '@chema/shared';
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 import { registerPaymentRoutes } from './payment-routes';
 import { registerRoutes } from './routes';
+import { registerWalletRoutes, type WalletWiring } from './wallet-routes';
 
 export interface AppOptions {
   db?: SqlClient;
@@ -15,6 +16,8 @@ export interface AppOptions {
   core?: CoreServices;
   /** Payments (P03); needs core. */
   payments?: PaymentService;
+  /** Wallet lifecycle + verification (P04); needs core. */
+  wallets?: WalletWiring;
 }
 
 const SAFE_REQUEST_ID = /^[A-Za-z0-9._-]{1,64}$/;
@@ -54,6 +57,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   if (opts.core) {
     registerRoutes(app, opts.core);
     if (opts.payments) registerPaymentRoutes(app, opts.core, opts.payments);
+    if (opts.wallets) registerWalletRoutes(app, opts.core, opts.wallets);
   }
 
   return app;

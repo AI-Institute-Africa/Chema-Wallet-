@@ -1,0 +1,20 @@
+{
+  "name": "@chema/wallet",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Wallet lifecycle, community verification, activation (slug/QR/share), fraud rules, reports (P04)",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/test-support.ts"
+  },
+  "dependencies": {
+    "@chema/core": "workspace:*",
+    "@chema/ledger": "workspace:*",
+    "@chema/shared": "workspace:*",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.6"
+  }
+}

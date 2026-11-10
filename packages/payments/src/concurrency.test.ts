@@ -40,7 +40,7 @@ describe.each(backends)('payments concurrency on %s', (_name, open) => {
   }
 
   it('concurrent contributions to one wallet: every credit lands, nothing lost or doubled', async () => {
-    const walletId = t.newWallet();
+    const walletId = await t.newWallet();
     const payments = [];
     for (let i = 0; i < 12; i++) payments.push(await initiated(walletId, 100n + BigInt(i)));
     // Callbacks are signed at "now" on the harness clock; keep it there.
@@ -52,7 +52,7 @@ describe.each(backends)('payments concurrency on %s', (_name, open) => {
   });
 
   it('the same event processed by many workers at once posts once', async () => {
-    const walletId = t.newWallet();
+    const walletId = await t.newWallet();
     const p = await initiated(walletId, 5_00n);
     t.ecocash.succeed(p.providerRef);
     const [eventId] = await stored();
@@ -64,7 +64,7 @@ describe.each(backends)('payments concurrency on %s', (_name, open) => {
   });
 
   it('webhook and status query racing on one payment: one credit', async () => {
-    const walletId = t.newWallet();
+    const walletId = await t.newWallet();
     const p = await initiated(walletId, 7_00n);
     t.ecocash.succeed(p.providerRef);
     const [eventId] = await stored();

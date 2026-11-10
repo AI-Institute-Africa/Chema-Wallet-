@@ -3,6 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { SYSTEM_ACTOR, type Actor, type CommandTx } from '@chema/core';
 import { money, type Currency, type SqlClient } from '@chema/shared';
+import { insertTestWallet } from '@chema/shared/testing';
 import { bootstrapWalletAccounts, ensureSystemAccount } from './accounts';
 import { post } from './post';
 import type { LedgerAccount, PostResult } from './types';
@@ -41,7 +42,7 @@ export interface TestWallet {
 
 /** A fresh wallet id with its two standard sub-ledgers. */
 export async function seedWallet(db: SqlClient, currency: Currency = 'USD'): Promise<TestWallet> {
-  const walletId = randomUUID();
+  const walletId = await insertTestWallet(db, randomUUID(), currency);
   const accounts = await inTx(db, (tx) => bootstrapWalletAccounts(tx, walletId, currency));
   return { walletId, ...accounts };
 }

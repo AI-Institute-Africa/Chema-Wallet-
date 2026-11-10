@@ -1,10 +1,11 @@
 // Composition of the payments service for the API and the worker. Only mock
 // rails exist until a rail is certified (D06); they are registered always and
-// collect only when their `rail.*` flag is on. The contribution gate denies
-// every wallet until P04/P05 wire in community verification.
+// collect only when their `rail.*` flag is on. The contribution gate accepts
+// only verified, ACTIVE wallets (P04 `verifiedWalletGate`).
 import { randomBytes } from 'node:crypto';
 import type { CoreServices } from '@chema/core';
-import { DENY_ALL_GATE, PaymentService, RailRegistry, type ContributionGate } from '@chema/payments';
+import { PaymentService, RailRegistry, type ContributionGate } from '@chema/payments';
+import { verifiedWalletGate } from '@chema/wallet';
 import { MockCard, MockEcoCash, MockOneMoney } from '@chema/providers';
 
 export interface PaymentsWiring {
@@ -31,7 +32,7 @@ export async function buildPayments(
     bus: core.bus,
     flags: core.flags,
     rails,
-    gate: opts.gate ?? DENY_ALL_GATE,
+    gate: opts.gate ?? verifiedWalletGate,
     ...(opts.clock ? { clock: opts.clock } : {}),
   });
   return { service, rails, ephemeralWebhookSecret: webhookSecret !== configured };

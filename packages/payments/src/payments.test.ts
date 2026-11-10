@@ -23,7 +23,8 @@ afterEach(() => {
 
 const key = () => `k-${randomUUID()}`;
 
-async function pay(rail: MockRail, minor: bigint, walletId = t.newWallet()) {
+async function pay(rail: MockRail, minor: bigint, existingWallet?: string) {
+  const walletId = existingWallet ?? (await t.newWallet());
   const c = await t.h.customer();
   const view = await t.service.initiate(c.actor, { walletId, rail: rail.rail, amount: usd(minor), idempotencyKey: key() });
   return { c, walletId, view, providerRef: rail.providerRefFor(view.id) };
@@ -157,7 +158,7 @@ describe('§P payments (mock rails)', () => {
 
   it('provider outage: FAILED, no credit, a new attempt works once the provider is back', async () => {
     t.onemoney.scenario = { outage: true };
-    const walletId = t.newWallet();
+    const walletId = await t.newWallet();
     const { view } = await pay(t.onemoney, 2_00n, walletId);
     expect(view).toMatchObject({ state: 'FAILED', receiptId: null });
     expect(await community(walletId)).toMatchObject({ settled: 0n, pending: 0n });
@@ -305,11 +306,11 @@ describe('§P payments (mock rails)', () => {
       expect(await t2.service.listRails()).toEqual(['ECOCASH', 'ONEMONEY']);
       const c = await t2.h.customer();
       await expect(
-        t2.service.initiate(c.actor, { walletId: t2.newWallet(), rail: 'CARD', amount: usd(1_00n), idempotencyKey: key() }),
+        t2.service.initiate(c.actor, { walletId: (await t2.newWallet()), rail: 'CARD', amount: usd(1_00n), idempotencyKey: key() }),
       ).rejects.toBeInstanceOf(NotFoundError);
       await expect(t2.service.receiveWebhook('CARD', {}, '{}')).rejects.toBeInstanceOf(NotFoundError);
       await expect(
-        t2.service.initiate(c.actor, { walletId: t2.newWallet(), rail: 'BANK', amount: usd(1_00n), idempotencyKey: key() }),
+        t2.service.initiate(c.actor, { walletId: (await t2.newWallet()), rail: 'BANK', amount: usd(1_00n), idempotencyKey: key() }),
       ).rejects.toBeInstanceOf(NotFoundError);
     } finally {
       await t2.close();
@@ -358,7 +359,7 @@ describe('collection gates and idempotency', () => {
     try {
       const c2 = await off.h.customer();
       await expect(
-        off.service.initiate(c2.actor, { walletId: off.newWallet(), rail: 'ECOCASH', amount: usd(1_00n), idempotencyKey: key() }),
+        off.service.initiate(c2.actor, { walletId: (await off.newWallet()), rail: 'ECOCASH', amount: usd(1_00n), idempotencyKey: key() }),
       ).rejects.toMatchObject({ reason: 'CONTRIBUTIONS_DISABLED' });
     } finally {
       await off.close();
@@ -367,7 +368,7 @@ describe('collection gates and idempotency', () => {
 
   it('same key + same request ⇒ same payment, provider asked once; same key + different request ⇒ conflict', async () => {
     const c = await t.h.customer();
-    const walletId = t.newWallet();
+    const walletId = await t.newWallet();
     const k = key();
     const before = t.ecocash.calls.length;
     const a = await t.service.initiate(c.actor, { walletId, rail: 'ECOCASH', amount: usd(5_00n), idempotencyKey: k });
@@ -386,7 +387,7 @@ describe('collection gates and idempotency', () => {
         "INSERT INTO fee_schedule (rail, currency, fee_payer, fixed_minor, rate_bps, effective_from) VALUES ('ECOCASH', 'USD', 'CONTRIBUTOR', 10, 150, '2026-01-01')",
       );
       const c = await f.h.customer();
-      const walletId = f.newWallet();
+      const walletId = await f.newWallet();
       const v = await f.service.initiate(c.actor, { walletId, rail: 'ECOCASH', amount: usd(20_00n), idempotencyKey: key() });
       // 0.10 + 1.5% of 20.00 = 0.40, added on top.
       expect(v.disclosure).toEqual({ totalCharged: usd(20_40n), feePayer: 'CONTRIBUTOR', providerFee: usd(40n), fxRate: null, expectedCredit: usd(20_00n) });

@@ -1,7 +1,9 @@
 import { createCoreServices, LocalFsBlobStore, loadSecrets, MockMalwareScanner, MockOtpProvider, type CoreServices } from '@chema/core';
 import { createPgClient } from '@chema/shared';
 import { buildApp } from './app';
+import { walletCommands } from '@chema/wallet';
 import { buildPayments, type PaymentsWiring } from './payments';
+import type { WalletWiring } from './wallet-routes';
 
 const port = Number(process.env['PORT'] ?? 7600);
 const host = process.env['HOST'] ?? '0.0.0.0';
@@ -28,6 +30,17 @@ if (db) {
   }
 }
 
+// Base of the public web app for share links + QR codes (docs/05 Public activation).
+const publicBaseUrl = process.env['CHEMA_PUBLIC_BASE_URL'] ?? 'http://localhost:3000';
+const ipHashKey = process.env['CHEMA_REPORT_IP_KEY'];
+const wallets: WalletWiring | undefined = core
+  ? {
+      commands: walletCommands({ flags: core.flags, publicBaseUrl }),
+      publicBaseUrl,
+      ...(ipHashKey && ipHashKey.length >= 16 ? { ipHashKey: Buffer.from(ipHashKey) } : {}),
+    }
+  : undefined;
+
 let payments: PaymentsWiring | undefined;
 if (core) {
   try {
@@ -41,13 +54,14 @@ const app = buildApp({
   ...(db ? { db } : {}),
   ...(core ? { core } : {}),
   ...(payments ? { payments: payments.service } : {}),
+  ...(wallets ? { wallets } : {}),
   version: process.env['APP_VERSION'] ?? '0.0.0',
 });
 reportIdleDbError = (err) => app.log.warn({ err }, 'idle database connection lost');
 if (startupWarning) app.log.warn({ reason: startupWarning }, 'core services disabled: only health routes are served');
 if (core) app.log.warn('OTP delivery and malware scanning are MOCKS (no real provider configured)');
 if (payments) {
-  app.log.warn('payment rails are MOCKS; the contribution gate refuses every wallet until verification lands (P04/P05)');
+  app.log.warn('payment rails are MOCKS; contributions are accepted only into verified ACTIVE wallets');
   if (payments.ephemeralWebhookSecret) app.log.warn('CHEMA_MOCK_WEBHOOK_SECRET unset: mock webhook secret is per-process');
 }
 

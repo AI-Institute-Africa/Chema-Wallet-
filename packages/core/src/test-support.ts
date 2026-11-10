@@ -2,7 +2,7 @@
 // to create customers/staff through the REAL auth flows. Never import at runtime.
 import { randomUUID } from 'node:crypto';
 import type { SqlClient } from '@chema/shared';
-import { migratedTestDb } from '@chema/shared/testing';
+import { insertTestWallet, migratedTestDb } from '@chema/shared/testing';
 import type { Actor, StaffRole, WalletRoleName } from './authz/types';
 import { MemoryBlobStore, MockMalwareScanner } from './documents/store';
 import { MockOtpProvider } from './identity/otp';
@@ -83,6 +83,7 @@ export async function createHarness(
       return { actor, token: s.token, personId: enrolled.personId, login, password, secret: enrolled.totpSecret };
     },
     async grantRole(walletId, personId, role) {
+      await insertTestWallet(db, walletId);
       await db.query('INSERT INTO wallet_role (wallet_id, person_id, role, granted_by) VALUES ($1, $2, $3, $4)', [
         walletId,
         personId,
@@ -91,6 +92,7 @@ export async function createHarness(
       ]);
     },
     async assign(staffPersonId, walletId) {
+      await insertTestWallet(db, walletId);
       await db.query('INSERT INTO staff_assignment (staff_person_id, wallet_id, assigned_by) VALUES ($1, $2, $3)', [
         staffPersonId,
         walletId,

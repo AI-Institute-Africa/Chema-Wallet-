@@ -91,8 +91,17 @@ const EXPECTED: Record<Action, Persona[]> = {
   // docs/02: create draft = admin Y, agent Y. A draft's admin doesn't exist yet, so
   // every customer session may create one (and becomes ADMIN).
   'wallet.create_draft': [...CUSTOMERS, 'agent'],
+  'wallet.view': ['admin', 'approver', 'agent', 'verifier', 'auditor', 'fidelity_admin'],
+  'verification.add_evidence': ['admin', 'agent'],
   'verification.submit': ['admin', 'agent'],
+  'verification.assign': ['fidelity_admin'],
+  'verification.queue': ['verifier', 'fidelity_admin'],
   'verification.decide': ['verifier'],
+  'verification.appeal': ['admin'],
+  'wallet.suspend': ['fidelity_admin'],
+  'wallet.unsuspend': ['fidelity_admin'],
+  'wallet.report': [...CUSTOMERS, 'system'],
+  'fraud_flag.review': ['verifier', 'fidelity_admin'],
   'wallet.view_ledger': ['admin', 'approver', 'agent', 'claims', 'opsfin', 'verifier', 'auditor', 'fidelity_admin'],
   'wallet.view_public': PERSONAS.filter((p) => p !== 'system'),
   'payout.request': ['admin'],

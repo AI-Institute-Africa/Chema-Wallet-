@@ -38,8 +38,17 @@ export type Rule =
 
 export const ACTIONS = [
   'wallet.create_draft',
+  'wallet.view',
+  'verification.add_evidence',
   'verification.submit',
+  'verification.assign',
+  'verification.queue',
   'verification.decide',
+  'verification.appeal',
+  'wallet.suspend',
+  'wallet.unsuspend',
+  'wallet.report',
+  'fraud_flag.review',
   'wallet.view_ledger',
   'wallet.view_public',
   'payout.request',
@@ -82,9 +91,31 @@ export const MATRIX: Readonly<Record<Action, Cells>> = {
   // create draft: admin Y, agent Y (on behalf). The admin of a draft does not
   // exist before the draft, so any customer may create one and becomes ADMIN.
   'wallet.create_draft': { contributor: 'allow', agent: 'allow' },
+  // P04: the private (non-public) wallet view: status, evidence, case outcome.
+  'wallet.view': {
+    admin: 'allow',
+    approver: 'allow',
+    agent: 'assigned',
+    verifier: 'assigned',
+    auditor: 'allow',
+    fidelity_admin: 'allow',
+  },
+  'verification.add_evidence': { admin: 'allow', agent: 'assigned' },
   'verification.submit': { admin: 'allow', agent: 'assigned' },
+  // Verifiers see assigned cases only; a FIDELITY_ADMIN routes the queue.
+  'verification.assign': { fidelity_admin: 'allow' },
+  'verification.queue': { verifier: 'allow', fidelity_admin: 'allow' },
   // agent NO; verifier Y (not own case)
   'verification.decide': { verifier: 'assigned_not_own_case' },
+  // Appeal route after REJECTED (docs/05): the wallet admin only.
+  'verification.appeal': { admin: 'allow' },
+  // Adverse actions are human decisions with a written reason (docs/11).
+  'wallet.suspend': { fidelity_admin: 'allow' },
+  'wallet.unsuspend': { fidelity_admin: 'allow' },
+  // Report-suspicious-wallet is a public button: any customer, or the public
+  // web route acting as SYSTEM (no login).
+  'wallet.report': { contributor: 'allow', system: 'allow' },
+  'fraud_flag.review': { verifier: 'assigned', fidelity_admin: 'allow' },
   'wallet.view_ledger': {
     admin: 'allow',
     approver: 'allow',

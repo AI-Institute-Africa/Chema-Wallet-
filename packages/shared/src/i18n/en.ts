@@ -8,6 +8,8 @@ export const en = {
   'error.feature_disabled': 'This service is not available right now.',
   'badge.verified.label': 'Verified funeral',
   'badge.verified.tooltip': 'Funeral checks passed. This does not mean insurance cover or claim approval.',
+  // Share text (docs/05 Public activation). Pronoun-neutral: we do not collect one.
+  'share.message': 'Family of the late {name}: please help us give them a dignified send-off. Contribute here: {link}',
   'contribution.anonymous_name': 'Sympathetic Friend',
   'contribution.thanks': 'Thank you, {name}. Your contribution has been received.',
 } as const;
