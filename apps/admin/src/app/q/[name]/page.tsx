@@ -2,9 +2,11 @@
 // Work queues (docs/12 queues 1-8 + support + failures). Each queue is the
 // API's view; buttons call the API, which re-authorises every action. Maker
 // and checker steps are separate clicks by separate people.
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState, type ReactNode } from 'react';
 import { api, explain } from '../../../lib/api';
+import { subjectHref } from '../../../lib/portal';
 import { askReason, Shell, Table, useLoad } from '../../../lib/ui';
 
 type Row = Record<string, unknown>;
@@ -93,13 +95,19 @@ export default function QueuePage() {
   const actions = (r: Row): ReactNode => {
     const id = String(r['id'] ?? '');
     switch (name) {
-      case 'approvals':
+      case 'cases':
+        return <Link href={`/cases/${id}`}>Open</Link>;
+      case 'approvals': {
+        const href = subjectHref(r);
+        const open = href ? <Link href={href}>Open</Link> : null;
         return r['canDecide'] ? (
           <>
+            {open}{' '}
             <button className="small" onClick={() => void act(() => api.post(`/approvals/${id}/decision`, { decision: 'APPROVED' }), 'Approved.')}>Approve</button>{' '}
             <button className="small secondary" onClick={() => void act(() => api.post(`/approvals/${id}/decision`, { decision: 'REJECTED' }), 'Rejected.')}>Reject</button>
           </>
-        ) : null;
+        ) : open;
+      }
       case 'recon':
         return (
           <>

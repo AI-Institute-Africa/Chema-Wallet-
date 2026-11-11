@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { ApiError, type WalletView } from '../../../lib/api';
 import { EVIDENCE_COPY, STATUS_COPY } from '../../../lib/copy';
+import { FamilyNav } from '../../../lib/family-ui';
 import { api } from '../../../lib/session';
 
 const API_BASE = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:7600';
@@ -112,6 +113,8 @@ export default function WalletStatus() {
           <button onClick={appeal}>Send appeal</button>
         </div>
       )}
+
+      {(w.status === 'ACTIVE' || w.status === 'SUSPENDED' || w.status === 'CLOSING' || w.status === 'CLOSED') && <FamilyNav walletId={w.id} />}
 
       <div className="card">
         <h2>Documents</h2>

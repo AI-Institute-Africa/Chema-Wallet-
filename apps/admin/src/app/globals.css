@@ -71,3 +71,6 @@ td.actions { white-space: nowrap; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
 .row > * { flex: 1 1 160px; }
 .secret { font-family: ui-monospace, monospace; background: var(--bg); padding: 8px; border-radius: 6px; overflow-wrap: anywhere; }
+dl.fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 4px 16px; margin: 8px 0; }
+dl.fields dt { color: var(--muted); font-size: 0.8rem; }
+dl.fields dd { margin: 0 0 6px; overflow-wrap: anywhere; }
