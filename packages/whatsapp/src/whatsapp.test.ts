@@ -209,11 +209,20 @@ describe('§S WhatsApp security', () => {
     const { rows } = await t.h.db.query<{ id: string; redacted: boolean; body_sealed: string }>('SELECT id, redacted, body_sealed FROM wa_inbound ORDER BY received_at');
     const bodies = rows.map((r) => openText(t!.wa.keys, r.body_sealed, bodyAad(r.id)));
     expect(rows.map((r) => r.redacted)).toEqual([false, true, true, true]);
+    // Match each secret as a whole token: a substring match also hits random
+    // hex in hashes and UUIDs (a '1234' inside a sha256 is not a leak), which
+    // made this test fail about one run in ten.
+    const token = (secret: string) => String.raw`\y${secret}\y`;
+    const { rows: probe } = await t.h.db.query<{ hit: boolean; miss: boolean }>(
+      `SELECT 'my pin is 1234' ~ $1 AS hit, 'ab41234cd' ~ $1 AS miss`,
+      [token('1234')],
+    );
+    expect(probe[0]).toEqual({ hit: true, miss: false });
     for (const secret of ['482913', '4111', '1234']) {
       expect(bodies.join('|')).not.toContain(secret);
-      const { rows: audit } = await t.h.db.query(`SELECT seq FROM audit_log WHERE (audit_log.*)::text LIKE $1`, [`%${secret}%`]);
+      const { rows: audit } = await t.h.db.query(`SELECT seq FROM audit_log WHERE (audit_log.*)::text ~ $1`, [token(secret)]);
       expect(audit).toHaveLength(0);
-      const { rows: notes } = await t.h.db.query(`SELECT id FROM notification WHERE (notification.*)::text LIKE $1`, [`%${secret}%`]);
+      const { rows: notes } = await t.h.db.query(`SELECT id FROM notification WHERE (notification.*)::text ~ $1`, [token(secret)]);
       expect(notes).toHaveLength(0);
     }
     // An amount is not mistaken for a code while an amount is expected.
