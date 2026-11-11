@@ -122,7 +122,7 @@ Abbreviations:
 | S5 | phone/reference tampering over WhatsApp | WA `§S WhatsApp security` (4 tests) | PASS |
 | S6 | retention hold | DOC `retention holds` (3 tests) | PASS |
 | S7 | API replay | CT `a replayed submission is the same contribution…`; PAY idempotency tests; ROUTES payment-routes `replay returns the same payment`; CHAOS stale webhook redelivery refused | PASS |
-| S8 | account compromise / step-up | ACC `§S S8 › logout kills the token, the session and its unused step-up grant…`; `an unused step-up grant of a revoked session cannot be redeemed` (fixed in P10); ID step-up tests; GOV `a step-up grant for wallet A does not unlock wallet B` | PASS (gap noted: no "sign out everywhere") |
+| S8 | account compromise / step-up | ACC `§S S8 › logout kills the token, the session and its unused step-up grant…`; `an unused step-up grant of a revoked session cannot be redeemed`; `sign out everywhere: the customer ends every own session (and their step-up grants); a Fidelity admin does it for a suspected compromise`; routes.test `POST /auth/sessions/revoke-all…`, `a staff session is bound to the device it logged in on…`; admin-routes.test `a Fidelity admin signs a suspected-compromised customer out everywhere…`; GOV `a step-up grant for wallet A does not unlock wallet B` | PASS |
 | S9 | no PIN/OTP/card data in chat or logs | WA `never stores a PIN, OTP or card number typed in chat`; ROUTES routes `no secrets in logs`; SEC `log PII scan` | PASS |
 
 ## §O Operations
@@ -144,7 +144,7 @@ Abbreviations:
 | A1 | draft without badge; share + contribution blocked until verified | WV; CT `an unverified (draft) or suspended wallet takes no contribution`; ROUTES wallet-routes `end to end: draft → … → contributions` | PASS |
 | A2 | community-only wallet works with no policy | WV `activates with no Fidelity policy at all`; CL community path untouched | PASS |
 | A3 | claim state and community funding distinct | CL `decline leaves community funds intact`; LED `keeps community and benefit money apart` | PASS |
-| A4 | beneficiary, claimant, admin, recipient separate; route blocked until approved | ACC `§A 4 › four different people keep four separate records; no role is inferred…` | PASS (gap noted: 3 roles never granted by a command) |
+| A4 | beneficiary, claimant, admin, recipient separate; route blocked until approved | ACC `§A 4 › each role is granted by the flow that establishes it, as its own row; none is inferred…`; CLAIMS `re-linking a lodged claim to a different recipient is refused (audited)…`, `needs a written approval + maker-checker to unblock; then credits` (ROUTE_UNBLOCK ⇒ PAYOUT_RECIPIENT), `a blocked route grants no recipient or beneficiary role`; MATRIX `roles established by flows grant no authority` | PASS |
 | A5 | only enabled rails; Bank/remittance/USSD/InnBucks absent everywhere | ACC `§A 5`; `scripts/scope-audit.test.ts` `the repository is clean`; PAY disabled rail | PASS |
 | A6 | duplicate requests/webhooks never double-credit/pay | CT, PAY, PO, payouts concurrency, LCONC; CHAOS reverse-order + duplicates; load test (400 duplicate callbacks, 0 extra credits) | PASS |
 | A7 | pending/failed/succeeded/reversed/refunded/charged-back distinct + auditable | ACC `§A 7 › drives one payment (or payout) into each state…` | PASS |

@@ -24,6 +24,19 @@ export class ConflictError extends Error {
   }
 }
 
+/**
+ * A conflict that is also a refusal of the actor's request (e.g. re-linking a
+ * claim to a different recipient). Thrown from a command handler, the bus
+ * rolls the transaction back, audits it as DENIED with `reason`, and rethrows
+ * it (HTTP 409).
+ */
+export class RefusedError extends ConflictError {
+  constructor(reason: string) {
+    super(reason);
+    this.name = 'RefusedError';
+  }
+}
+
 /** Authentication failed (bad/expired code or credentials). Deliberately vague. */
 export class AuthenticationError extends Error {
   constructor(readonly reason: string) {

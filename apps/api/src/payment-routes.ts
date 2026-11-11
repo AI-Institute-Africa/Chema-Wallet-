@@ -5,6 +5,7 @@ import type { PaymentService } from '@chema/payments';
 import { CURRENCIES, money } from '@chema/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { deviceOf } from './session';
 
 const Uuid = z.uuid();
 const Rail = z.string().regex(/^[A-Z][A-Z0-9_]{1,31}$/);
@@ -29,7 +30,7 @@ export function registerPaymentRoutes(app: FastifyInstance, core: CoreServices, 
   async function requireActor(req: FastifyRequest, reply: FastifyReply): Promise<void> {
     const h = req.headers.authorization;
     const token = h?.startsWith('Bearer ') ? h.slice(7).trim() : undefined;
-    const actor = token ? await core.auth.authenticate(token) : null;
+    const actor = token ? await core.auth.authenticate(token, { device: deviceOf(req) }) : null;
     if (!actor) {
       await reply.code(401).send({ error: 'unauthenticated' });
       return;

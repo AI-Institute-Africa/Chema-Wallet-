@@ -5,6 +5,7 @@
 // audited. Deletion is soft + async purge, and blocked by a retention hold.
 import { randomUUID } from 'node:crypto';
 import type { Queryable } from '@chema/shared';
+import type { Actor } from '../authz/types';
 import type { Command, CommandTx } from '../command/bus';
 import { newDataKey, open, seal, sha256Hex } from '../crypto';
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
@@ -13,7 +14,7 @@ import type { Secrets } from '../secrets';
 import type { BlobStore, MalwareScanner } from './store';
 import { one } from '../db';
 
-export const DOCUMENT_CLASSES = ['DEATH_EVIDENCE', 'ID', 'MANDATE', 'OTHER', 'PHOTO'] as const;
+export const DOCUMENT_CLASSES = ['DEATH_EVIDENCE', 'ID', 'MANDATE', 'OTHER', 'PHOTO', 'OVERRIDE_EVIDENCE'] as const;
 export type DocumentClass = (typeof DOCUMENT_CLASSES)[number];
 export type RetentionClass = 'SENSITIVE' | 'FINANCIAL' | 'PUBLIC_CONTENT';
 
@@ -29,7 +30,26 @@ const RETENTION: Readonly<Record<DocumentClass, RetentionClass>> = {
   MANDATE: 'SENSITIVE',
   OTHER: 'SENSITIVE',
   PHOTO: 'PUBLIC_CONTENT',
+  // Proof of a payment made outside a down rail (payout.override): a financial record.
+  OVERRIDE_EVIDENCE: 'FINANCIAL',
 };
+
+/**
+ * Ops/finance upload only override evidence, and only to a wallet with a
+ * payout stuck on a down rail (the payouts they may override). Nobody else
+ * uploads that class.
+ */
+async function uploadGuard(q: Queryable, input: { class: DocumentClass; walletId?: string }, actor: Actor): Promise<string | null> {
+  const ops = actor.kind === 'STAFF' && actor.staffRole === 'OPS_FINANCE';
+  if (!ops) return input.class === 'OVERRIDE_EVIDENCE' ? 'OVERRIDE_EVIDENCE_OPS_ONLY' : null;
+  if (input.class !== 'OVERRIDE_EVIDENCE') return 'OPS_UPLOADS_OVERRIDE_EVIDENCE_ONLY';
+  if (!input.walletId) return 'NO_CASE_SCOPE';
+  const { rows } = await q.query(
+    "SELECT 1 FROM payout_request WHERE wallet_id = $1 AND status IN ('RAIL_DOWN', 'OVERRIDE_PENDING') LIMIT 1",
+    [input.walletId],
+  );
+  return rows.length > 0 ? null : 'NO_PAYOUT_TO_OVERRIDE';
+}
 
 /** A public photo is an image; never a PDF. */
 export const PHOTO_CONTENT_TYPES: readonly string[] = ['image/jpeg', 'image/png'];
@@ -119,6 +139,7 @@ export function documentCommands(deps: { blobs: BlobStore; scanner: MalwareScann
         },
       };
     },
+    guard: uploadGuard,
     async run(tx, input, ctx) {
       const id = randomUUID();
       const storageRef = randomUUID();

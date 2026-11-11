@@ -7,6 +7,8 @@ export { quoteFees, disclosureOf, FeeExceedsAmountError, type Quote } from './fe
 export { IllegalTransitionError } from './store';
 export {
   SLA_HOURS,
+  caseSlaHours,
+  exceptionSlaHours,
   EXCEPTION_OWNER_ROLE,
   closeCase,
   openCase,

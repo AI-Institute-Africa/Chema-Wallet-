@@ -1,7 +1,9 @@
 import { createCoreServices, LocalFsBlobStore, loadSecrets, MockMalwareScanner, type CoreServices, type Secrets } from '@chema/core';
+import { createFastFailRedis } from '@chema/core/bullmq';
 import { OpsService } from '@chema/ops';
 import { createPgClient } from '@chema/shared';
 import { buildApp } from './app';
+import { defaultRateLimitRules, RedisRateLimitStore } from './security';
 import { walletCommands } from '@chema/wallet';
 import { parseOrigins } from './cors';
 import { buildContributions, type ContributionsWiring } from './contributions';
@@ -90,6 +92,10 @@ const whatsapp =
 // P09: admin portal back end (queues, maker-checker, reports, audit explorer).
 const ops = core ? new OpsService(core) : undefined;
 const metaVerifyToken = process.env['CHEMA_META_VERIFY_TOKEN'];
+// Several API instances share one rate-limit budget through Redis (REDIS_URL); otherwise in-process.
+const redisUrl = process.env['REDIS_URL'];
+const rateRedis = redisUrl ? createFastFailRedis(redisUrl) : undefined;
+rateRedis?.on('error', () => undefined); // reported per request by the limiter's fallback
 
 const app = buildApp({
   ...(db ? { db } : {}),
@@ -105,6 +111,7 @@ const app = buildApp({
   // Browser origin(s) for CORS; defaults to the public web app + the admin portal.
   corsOrigins: parseOrigins(process.env['CHEMA_WEB_ORIGINS'] ?? `${publicBaseUrl},${portalUrl}`),
   version: process.env['APP_VERSION'] ?? '0.0.0',
+  rateLimit: { rules: defaultRateLimitRules(), ...(rateRedis ? { store: new RedisRateLimitStore(rateRedis) } : {}) },
   // Behind a reverse proxy set CHEMA_TRUST_PROXY_HOPS (e.g. 1), or every client shares the proxy's rate-limit bucket.
   ...(Number.parseInt(process.env['CHEMA_TRUST_PROXY_HOPS'] ?? '', 10) > 0
     ? { trustProxy: Number.parseInt(process.env['CHEMA_TRUST_PROXY_HOPS'] ?? '', 10) }
@@ -124,6 +131,7 @@ async function shutdown(signal: string): Promise<void> {
   app.log.info({ signal }, 'shutting down');
   await app.close();
   await db?.close();
+  rateRedis?.disconnect();
   process.exit(0);
 }
 process.on('SIGTERM', () => void shutdown('SIGTERM'));

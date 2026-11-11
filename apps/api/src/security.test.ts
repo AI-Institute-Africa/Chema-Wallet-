@@ -10,7 +10,7 @@ import { PUBLIC_BASE } from '@chema/wallet/testing';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp, routesOf, type RouteInfo } from './app';
-import { SECURITY_HEADERS, defaultRateLimitRules } from './security';
+import { MemoryRateLimitStore, SECURITY_HEADERS, defaultRateLimitRules, type RateLimitStore } from './security';
 
 let t: OpsHarness;
 let app: FastifyInstance;
@@ -68,6 +68,8 @@ const SELF_SCOPED = new Set([
   'POST /wallets',
   'POST /documents',
   'POST /auth/logout',
+  'POST /auth/sessions/revoke-all',
+  'GET /me',
   'POST /auth/step-up/start',
   'POST /auth/step-up/verify',
   'GET /cases',
@@ -139,6 +141,46 @@ describe('rate limits', () => {
       expect((await a.inject({ method: 'POST', url: '/webhooks/ECOCASH', remoteAddress: '10.0.0.4', payload: {} })).statusCode).not.toBe(429);
     }
     await a.close();
+  });
+
+  it('a shared store gives several API instances ONE budget (what Redis does across processes)', async () => {
+    let now = 1_000_000;
+    const rules = defaultRateLimitRules({ CHEMA_RATE_AUTH_PER_MIN: '3' });
+    const store = new MemoryRateLimitStore(() => now);
+    const [a, b] = [buildApp({ rateLimit: { rules, store } }), buildApp({ rateLimit: { rules, store } })];
+    await Promise.all([a.ready(), b.ready()]);
+    const hit = (x: typeof a) => x.inject({ method: 'POST', url: '/auth/otp/start', remoteAddress: '10.1.0.1', payload: {} });
+    expect((await hit(a)).statusCode).not.toBe(429);
+    expect((await hit(b)).statusCode).not.toBe(429);
+    expect((await hit(a)).statusCode).not.toBe(429);
+    expect((await hit(b)).statusCode).toBe(429); // 4th hit overall, on the other instance
+    now += 60_000;
+    expect((await hit(b)).statusCode).not.toBe(429);
+    await Promise.all([a.close(), b.close()]);
+  });
+
+  it('a failing shared store falls back to the in-process window (still limited, never open)', async () => {
+    const broken: RateLimitStore = { hit: async () => { throw new Error('redis down'); } };
+    const a = buildApp({ rateLimit: { rules: defaultRateLimitRules({ CHEMA_RATE_AUTH_PER_MIN: '2' }), store: broken } });
+    await a.ready();
+    const hit = () => a.inject({ method: 'POST', url: '/auth/otp/start', remoteAddress: '10.1.0.2', payload: {} });
+    expect((await hit()).statusCode).not.toBe(429);
+    expect((await hit()).statusCode).not.toBe(429);
+    expect((await hit()).statusCode).toBe(429);
+    await a.close();
+  });
+
+  it('memory store: fixed window per key, reset time counts down, bounded key count', async () => {
+    let now = 0;
+    const s = new MemoryRateLimitStore(() => now, 2);
+    expect(await s.hit('k1', 1_000)).toEqual({ count: 1, resetMs: 1_000 });
+    now = 400;
+    expect(await s.hit('k1', 1_000)).toEqual({ count: 2, resetMs: 600 });
+    await s.hit('k2', 1_000);
+    await s.hit('k3', 1_000); // evicts k1 (oldest)
+    expect((await s.hit('k1', 1_000)).count).toBe(1);
+    now = 1_500;
+    expect(await s.hit('k3', 1_000)).toEqual({ count: 1, resetMs: 1_000 });
   });
 
   it('is on by default', async () => {

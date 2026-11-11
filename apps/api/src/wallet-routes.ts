@@ -19,6 +19,7 @@ import {
 } from '@chema/wallet';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { deviceOf } from './session';
 
 export interface WalletWiring {
   commands: WalletCommands;
@@ -84,7 +85,7 @@ export function registerWalletRoutes(app: FastifyInstance, core: CoreServices, w
   async function sessionActor(req: FastifyRequest): Promise<Actor | null> {
     const h = req.headers.authorization;
     const token = h?.startsWith('Bearer ') ? h.slice(7).trim() : undefined;
-    return token ? core.auth.authenticate(token) : null;
+    return token ? core.auth.authenticate(token, { device: deviceOf(req) }) : null;
   }
   async function requireActor(req: FastifyRequest, reply: FastifyReply): Promise<void> {
     const actor = await sessionActor(req);
@@ -126,6 +127,12 @@ export function registerWalletRoutes(app: FastifyInstance, core: CoreServices, w
   app.get('/wallets/:id', { preHandler: requireActor }, async (req, reply) => {
     const view = await core.bus.execute(w.view, { walletId: idParam(req) }, { actor: actorOf(req) });
     return reply.header('cache-control', 'no-store').send(view);
+  });
+
+  // People on the wallet (admin / approver): ids to nominate a claim recipient or bind a payee.
+  app.get('/wallets/:id/people', { preHandler: requireActor }, async (req, reply) => {
+    const people = await core.bus.execute(w.people, { walletId: idParam(req) }, { actor: actorOf(req) });
+    return reply.header('cache-control', 'no-store').send({ people });
   });
 
   // base64 inflates 4/3 (integer maths) + JSON envelope slack.

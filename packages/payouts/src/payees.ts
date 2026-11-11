@@ -8,6 +8,7 @@ import {
   ValidationError,
   consumeApprovalFor,
   createApproval,
+  grantWalletRole,
   loadApproval,
   sealString,
   type Command,
@@ -178,6 +179,10 @@ export function payeeCommands(deps: PayoutDeps) {
         await cancelUnsubmitted(tx, ctx.actor, { walletId: p.wallet_id, payeeId: p.replaces_payee }, 'PAYEE_REPLACED', deps.clock());
       }
       await tx.query(`UPDATE payee SET status = 'ACTIVE', activated_at = $2, updated_at = now() WHERE id = $1`, [p.id, now]);
+      // A payee bound to a family member makes them a payout recipient (own role row, never inferred).
+      if (p.person_id) {
+        await grantWalletRole(tx, { walletId: p.wallet_id, personId: p.person_id, role: 'PAYOUT_RECIPIENT', source: 'PAYEE_ACTIVE', grantedBy: p.created_by });
+      }
       return { result: { status: 'ACTIVE' }, audit: { approvalRef: p.approval_id, reasonCode: 'ACTIVATED' } };
     },
   };

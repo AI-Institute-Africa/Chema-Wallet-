@@ -19,6 +19,7 @@ import { CONTACT_KINDS, PRIVACY_KEYS, type ContributionService, type PrivacySett
 import { CURRENCIES, money } from '@chema/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { deviceOf } from './session';
 
 const Uuid = z.uuid();
 const Slug = z.string().regex(/^[a-z2-7]{26}$/);
@@ -56,7 +57,7 @@ export function registerContributionRoutes(app: FastifyInstance, core: CoreServi
   async function sessionActor(req: FastifyRequest): Promise<Actor | null> {
     const h = req.headers.authorization;
     const token = h?.startsWith('Bearer ') ? h.slice(7).trim() : undefined;
-    return token ? core.auth.authenticate(token) : null;
+    return token ? core.auth.authenticate(token, { device: deviceOf(req) }) : null;
   }
   async function requireActor(req: FastifyRequest, reply: FastifyReply): Promise<void> {
     const actor = await sessionActor(req);
