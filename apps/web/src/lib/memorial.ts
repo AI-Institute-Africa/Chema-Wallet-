@@ -72,3 +72,19 @@ export function orderRails(rails: readonly string[]): string[] {
   const rank = (r: string) => (RAIL_ORDER.includes(r) ? RAIL_ORDER.indexOf(r) : RAIL_ORDER.length);
   return [...rails].sort((a, b) => rank(a) - rank(b));
 }
+
+/**
+ * What people type ("077 123 4567", "263771234567", "+263 77 123 4567") → E.164,
+ * which the API requires. Zimbabwe (+263) is assumed for local numbers. Anything
+ * unrecognised is returned trimmed so the server's validation message still applies.
+ */
+export function toE164(input: string): string {
+  const raw = input.trim();
+  const digits = raw.replace(/[^\d]/g, '');
+  if (raw.startsWith('+')) return `+${digits}`;
+  if (digits.startsWith('00')) return `+${digits.slice(2)}`;
+  if (/^0\d{9}$/.test(digits)) return `+263${digits.slice(1)}`;
+  if (/^263\d{9}$/.test(digits)) return `+${digits}`;
+  if (/^7\d{8}$/.test(digits)) return `+263${digits}`;
+  return raw;
+}

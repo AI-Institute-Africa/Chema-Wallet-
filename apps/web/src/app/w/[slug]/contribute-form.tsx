@@ -9,7 +9,7 @@ import { t } from '@chema/shared/i18n';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { ApiError, majorToMinor } from '../../../lib/api';
-import { minorToInput, moneyShort, orderRails, quickAmounts, railName } from '../../../lib/memorial';
+import { minorToInput, moneyShort, orderRails, quickAmounts, railName, toE164 } from '../../../lib/memorial';
 import { API_BASE, createPublicClient, formatMoney, type ContributeForm as FormBody, type Disclosure, type PublicPage } from '../../../lib/public';
 import { getToken } from '../../../lib/session';
 
@@ -67,11 +67,11 @@ export default function ContributeForm({ page, disabled = false }: { page: Publi
       rail,
       amount: { minor: minor.toString(), ccy: currency },
       payerName: payerName.trim(),
-      payerPhone: payerPhone.trim(),
+      payerPhone: toE164(payerPhone),
       anonymous,
       ...(anonymous ? {} : { displayName: payerName.trim().slice(0, 60) }),
       ...(tribute.trim() ? { tribute: tribute.trim() } : {}),
-      ...(c ? { contact: { kind: c.includes('@') ? ('EMAIL' as const) : ('PHONE' as const), value: c } } : {}),
+      ...(c ? { contact: c.includes('@') ? { kind: 'EMAIL' as const, value: c } : { kind: 'PHONE' as const, value: toE164(c) } } : {}),
     };
   }
 

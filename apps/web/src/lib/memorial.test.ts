@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { initials, minorToInput, moneyShort, orderRails, quickAmounts, relativeTime, toGo } from './memorial';
+import { initials, minorToInput, moneyShort, orderRails, quickAmounts, relativeTime, toE164, toGo } from './memorial';
 
 const usd = (minor: string) => ({ minor, ccy: 'USD' as const });
 
@@ -35,5 +35,23 @@ describe('memorial display helpers', () => {
     expect(relativeTime('2026-11-11T11:45:00Z', now)).toBe('15 min ago');
     expect(relativeTime('2026-11-11T09:00:00Z', now)).toBe('3 h ago');
     expect(relativeTime('2026-11-01T09:00:00Z', now)).toBe('2026-11-01');
+  });
+});
+
+describe('toE164', () => {
+  it.each([
+    ['077 123 4567', '+263771234567'],
+    ['0771234567', '+263771234567'],
+    ['771234567', '+263771234567'],
+    ['263771234567', '+263771234567'],
+    ['+263 77 123 4567', '+263771234567'],
+    ['00263771234567', '+263771234567'],
+    ['+27 82 123 4567', '+27821234567'],
+  ])('%s → %s', (input, out) => {
+    expect(toE164(input)).toBe(out);
+  });
+
+  it('leaves what it cannot recognise for the server to refuse', () => {
+    expect(toE164(' 12345 ')).toBe('12345');
   });
 });
