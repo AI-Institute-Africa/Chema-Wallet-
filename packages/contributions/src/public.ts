@@ -161,7 +161,15 @@ export async function publicPage(q: Queryable, deps: PublicDeps, slug: string, l
       max: limits.max,
       groupsEnabled: await deps.flags.getIn(q, 'feature.group_contributions'),
     },
+    ...(p.showPolicyNumber ? await policyRef(q, w.id) : {}),
   };
+}
+
+/** The policy number the family recorded (draft or claim lookup), as a public reference. */
+async function policyRef(q: Queryable, walletId: string): Promise<{ policy?: { insurer: string; number: string } }> {
+  const { rows } = await q.query<{ policy_no: string | null }>('SELECT policy_no FROM fidelity_link WHERE wallet_id = $1', [walletId]);
+  const number = rows[0]?.policy_no;
+  return number ? { policy: { insurer: 'Fidelity Life Assurance', number } } : {};
 }
 
 /** Live total endpoint: only when the family shows the total. */

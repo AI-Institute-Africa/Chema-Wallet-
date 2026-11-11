@@ -43,7 +43,37 @@ test.beforeEach(async ({ page }) => signInWeb(page));
 
 test('wallet status links to the family screens', async ({ page }) => {
   const g = guard(page);
-  const mock = await mockApi(page, { [`GET /wallets/${W}`]: wallet, [`GET /wallets/${W}/funds`]: funds });
+  const mock = await mockApi(page, {
+    [`GET /wallets/${W}`]: wallet,
+    [`GET /wallets/${W}/funds`]: funds,
+    [`GET /wallets/${W}/privacy`]: {
+      showTotal: false,
+      showUsageSummary: false,
+      showPhoto: false,
+      showContributorNames: false,
+      showAmounts: false,
+      showTributes: false,
+      showPolicyNumber: false,
+      photo: false,
+    },
+    // The owner view loads the real public page (UI redesign); totals hidden by privacy here.
+    'GET /public/wallets/rudo-moyo': {
+      slug: 'rudo-moyo',
+      deceasedName: 'Rudo Moyo',
+      dateOfDeath: '2026-11-01',
+      funeralDate: null,
+      funeralLocation: 'Harare',
+      badge: wallet.badge,
+      share: { text: '', url: '', whatsapp: '', sms: '', facebook: '', copy: '' },
+      photoPath: null,
+      totals: null,
+      closed: false,
+      usage: null,
+      tributes: null,
+      contribute: { currency: 'USD', rails: ['ECOCASH'], min: usd('100'), max: usd('100000'), groupsEnabled: false },
+    },
+    'GET /public/wallets/rudo-moyo/qr.svg': {},
+  });
   await open(page, `${WEB}/wallets/${W}`);
   await expect(page.getByRole('navigation', { name: 'Manage this wallet' })).toBeVisible();
   await page.getByRole('link', { name: 'Money in the wallet' }).click();
@@ -62,6 +92,7 @@ test('funds: community and Fidelity benefit shown separately, with the cover/app
   await expect(benefit.locator('[data-source=FIDELITY_BENEFIT]')).toContainText('500.00 USD');
   await expect(benefit).toContainText('does not mean insurance cover');
   await expect(benefit).toContainText('does not mean the claim is approved');
+  if (process.env['SHOT_DIR']) await page.screenshot({ path: `${process.env['SHOT_DIR']}/mem-shot-family-funds-light.png`, fullPage: true });
   await expectClean(page, g, mock);
 });
 

@@ -34,6 +34,7 @@ test('cases queue → case detail: assign to me, note, resolve', async ({ page }
   await expect(page.getByRole('status')).toHaveText('Case resolved.');
   expect(mock.calls.find((x) => x.path === `/cases/${C1}/assign`)?.body).toEqual({ assigneePersonId: ME });
   expect(mock.calls.find((x) => x.path === `/cases/${C1}/resolve`)?.body).toEqual({ outcome: 'UPHELD', note: 'Provider confirmed the payment was credited' });
+  if (process.env['SHOT_DIR']) await page.screenshot({ path: `${process.env['SHOT_DIR']}/mem-shot-admin-cases-light.png`, fullPage: true });
   await expectClean(page, g, mock);
 });
 

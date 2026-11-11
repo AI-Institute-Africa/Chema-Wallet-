@@ -16,6 +16,7 @@ const LABELS: Record<(typeof PRIVACY_KEYS)[number], string> = {
   showContributorNames: 'Names of contributors',
   showAmounts: 'Amount next to each message',
   showTributes: 'Messages of condolence',
+  showPolicyNumber: 'Fidelity policy number (a reference only — it does not mean cover or claim approval)',
 };
 
 export default function PrivacySettings() {

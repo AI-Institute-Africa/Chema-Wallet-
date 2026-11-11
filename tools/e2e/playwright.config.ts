@@ -15,7 +15,16 @@ export default defineConfig({
   reporter: [['list']],
   use: { browserName: 'chromium', headless: true, trace: 'off' },
   webServer: [
-    { command: 'pnpm --filter @chema/web exec next start -p 3100', cwd: root, url: 'http://localhost:3100/h', reuseExistingServer: false, timeout: 60_000 },
+    // Server-side API stand-in for the server-rendered public memorial page.
+    { command: 'node tools/e2e/mock-api-server.mjs', cwd: root, url: 'http://127.0.0.1:3199/health', reuseExistingServer: false, timeout: 20_000 },
+    {
+      command: 'pnpm --filter @chema/web exec next start -p 3100',
+      cwd: root,
+      url: 'http://localhost:3100/h',
+      reuseExistingServer: false,
+      timeout: 60_000,
+      env: { CHEMA_API_INTERNAL_URL: 'http://127.0.0.1:3199' },
+    },
     { command: 'pnpm --filter @chema/admin exec next start -p 3101', cwd: root, url: 'http://localhost:3101/login', reuseExistingServer: false, timeout: 60_000 },
   ],
 });

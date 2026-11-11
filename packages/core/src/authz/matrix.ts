@@ -92,6 +92,7 @@ export const ACTIONS = [
   'tribute.manage_own',
   'tribute.moderate',
   'wallet.privacy.update',
+  'wallet.update_target',
   'wallet.photo.set',
   'group.create',
   'notification.process',
@@ -276,6 +277,8 @@ export const MATRIX: Readonly<Record<Action, Cells>> = {
   'tribute.moderate': { verifier: 'allow', fidelity_admin: 'allow' },
   // Family privacy + photo: the wallet admin decides what the public sees.
   'wallet.privacy.update': { admin: 'allow' },
+  // UI redesign: only the wallet admin changes the fundraising target (audited, no money moves).
+  'wallet.update_target': { admin: 'allow' },
   'wallet.photo.set': { admin: 'allow' },
   // Group contributions (feature.group_contributions, off): the group's
   // authorised representative is the customer who creates it.

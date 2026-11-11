@@ -811,6 +811,29 @@ export function walletCommands(deps: WalletDeps) {
     return cmd;
   }
 
+  // UI redesign (2026-11-11): the family admin may change the fundraising target
+  // after creation (or clear it). Money never moves; the change is audited with
+  // before/after. Closed, closing, suspended or rejected wallets are refused.
+  const updateTarget: Command<{ walletId: string; targetMinor: bigint | null }, WalletView> = {
+    name: 'wallet.update_target',
+    async resolve(q, input) {
+      return { action: 'wallet.update_target', subject: walletSubject(await loadWallet(q, input.walletId)) };
+    },
+    async run(tx, input, { actor }) {
+      const target = input.targetMinor;
+      if (target !== null && (typeof target !== 'bigint' || target <= 0n)) throw new ValidationError('target must be a positive amount or null');
+      const w = await loadWallet(tx, input.walletId, true);
+      if (w.status !== 'DRAFT' && w.status !== 'PENDING_VERIFICATION' && w.status !== 'ACTIVE') throw new ConflictError('WALLET_NOT_EDITABLE');
+      const before = w.target_minor;
+      const after = target === null ? null : target.toString();
+      if (before !== after) {
+        await tx.query('UPDATE wallet SET target_minor = $2, updated_at = now() WHERE id = $1', [w.id, after]);
+      }
+      const view = await walletView(tx, deps, w.id, { staff: actor.kind === 'STAFF' && actor.staffRole !== 'AGENT' });
+      return { result: view, audit: { reasonCode: before === after ? 'UNCHANGED' : 'TARGET_CHANGED', before: { targetMinor: before }, after: { targetMinor: after } } };
+    },
+  };
+
   const report: Command<
     { slug: string; category: ReportCategory; details?: string; reporterIpHash?: string },
     { reportId: string; caseId: string }
@@ -914,6 +937,7 @@ export function walletCommands(deps: WalletDeps) {
     unsuspend: statusChange('wallet.unsuspend'),
     report,
     reviewFlag,
+    updateTarget,
   };
 }
 

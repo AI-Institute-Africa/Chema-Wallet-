@@ -26,7 +26,7 @@ export function useLoad<T>(load: (() => Promise<T>) | null, deps: readonly unkno
   return { data, error, reload: useCallback(() => setN((x) => x + 1), []) };
 }
 
-const NAV = [
+export const NAV = [
   ['funds', 'fam.nav.funds'],
   ['claim', 'fam.nav.claim'],
   ['payees', 'fam.nav.payees'],
