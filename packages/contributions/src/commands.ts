@@ -67,13 +67,18 @@ interface ContributionRow {
   contact_kind: 'PHONE' | 'EMAIL' | null;
   contact_sealed: string | null;
   contributor_person: string | null;
+  /** Channel the contribution was made on (WEB / WHATSAPP / ...). */
+  channel: string;
   request_hash: string;
   settled_state: string | null;
   created_at: Date;
 }
 
 const C_COLS = `id, wallet_id, payment_id, group_id, anonymous, display_name, contact_kind, contact_sealed, contributor_person,
-  request_hash, settled_state, created_at`;
+  channel, request_hash, settled_state, created_at`;
+
+/** Receipts go back the way the contributor came: WhatsApp contributions get them on WhatsApp (P08). */
+const receiptChannel = (c: ContributionRow) => (c.contact_kind === 'PHONE' ? (c.channel === 'WHATSAPP' ? 'WHATSAPP' : 'SMS') : 'EMAIL');
 
 async function loadContribution(q: Queryable, id: string, lock = false): Promise<ContributionRow> {
   if (!UUID.test(id)) throw new NotFoundError('contribution', id);
@@ -431,7 +436,7 @@ export function contributionCommands(deps: ContributionDeps) {
           deps.notifyKey,
           {
             template: 'notify.receipt',
-            channel: c.contact_kind === 'PHONE' ? 'SMS' : 'EMAIL',
+            channel: receiptChannel(c),
             to: { address: openText(c.contact_sealed, `contribution:contact:${c.id}`) },
             params: { receiptNo: receipt.receiptNo, amount: format(receipt.amount), name: receipt.funeralName, link: statusLink(c.id) },
             dedupeKey: `receipt:${p.receipt_id}:reissue:${now.getTime()}`,
@@ -515,7 +520,7 @@ export function contributionCommands(deps: ContributionDeps) {
             deps.notifyKey,
             {
               template: 'notify.receipt',
-              channel: c.contact_kind === 'PHONE' ? 'SMS' : 'EMAIL',
+              channel: receiptChannel(c),
               to: { address: openText(c.contact_sealed, `contribution:contact:${c.id}`) },
               params: { receiptNo: receipt.receiptNo, amount: format(receipt.amount), name: receipt.funeralName, link: statusLink(c.id) },
               dedupeKey: `receipt:${p.receipt_id}:original`,

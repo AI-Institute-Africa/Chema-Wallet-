@@ -20,7 +20,7 @@ import {
 } from '@chema/core';
 import { isLocale, t, type Locale, type MessageKey, type Queryable, type SqlClient } from '@chema/shared';
 
-export const NOTIFICATION_CHANNELS = ['WEB', 'EMAIL', 'SMS'] as const;
+export const NOTIFICATION_CHANNELS = ['WEB', 'EMAIL', 'SMS', 'WHATSAPP'] as const;
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 export type NotificationStatus = 'QUEUED' | 'RETRY' | 'SENT' | 'DEAD' | 'SUPPRESSED';
 
@@ -82,10 +82,15 @@ export async function enqueueNotification(
   return { id, created: true };
 }
 
-/** A delivery channel. `send` throws on failure; the service records it and retries. */
+/**
+ * A delivery channel. `send` throws on failure; the service records it and
+ * retries. It may return the provider's message id (delivery-status tracking).
+ * `template` is the registered template key, for providers that need one
+ * outside a conversation window (WhatsApp, D16).
+ */
 export interface ChannelSender {
   readonly channel: Exclude<NotificationChannel, 'WEB'>;
-  send(to: string, text: string): Promise<void>;
+  send(to: string, text: string, meta?: { template: string }): Promise<{ providerRef: string } | undefined>;
 }
 
 /** Mock SMS / email sender: records messages; `failNext` simulates a dead provider. */
@@ -96,12 +101,13 @@ export class MockSender implements ChannelSender {
   failNext(n = 1): void {
     this.failures += n;
   }
-  async send(to: string, text: string): Promise<void> {
+  async send(to: string, text: string): Promise<{ providerRef: string } | undefined> {
     if (this.failures > 0) {
       this.failures -= 1;
       throw new Error(`${this.channel} provider unavailable`);
     }
     this.sent.push({ to, text });
+    return undefined;
   }
 }
 
@@ -146,13 +152,17 @@ const viewOf = (r: Row): NotificationView => ({
   lastError: r.last_error,
 });
 
-type Claimed = { kind: 'SEND'; to: string; text: string; channel: Exclude<NotificationChannel, 'WEB'> } | { kind: 'DONE'; view: NotificationView };
+type Claimed =
+  | { kind: 'SEND'; to: string; text: string; template: string; channel: Exclude<NotificationChannel, 'WEB'> }
+  | { kind: 'DONE'; view: NotificationView };
 
 export interface NotificationDeps {
   db: SqlClient;
   bus: CommandBus;
   key: Buffer;
   senders: readonly ChannelSender[];
+  /** `channel.sms` (D16): a WhatsApp notification that goes DEAD is re-sent once by SMS. Off when absent. */
+  smsFallback?: (q: Queryable) => Promise<boolean>;
   clock?: () => Date;
 }
 
@@ -163,7 +173,7 @@ export interface NotificationDeps {
 export class NotificationService {
   private readonly clock: () => Date;
   private readonly claimCmd: Command<{ id: string }, Claimed>;
-  private readonly recordCmd: Command<{ id: string; error: string | null }, NotificationView>;
+  private readonly recordCmd: Command<{ id: string; error: string | null; providerRef?: string }, NotificationView>;
 
   constructor(private readonly deps: NotificationDeps) {
     this.clock = deps.clock ?? (() => new Date());
@@ -194,7 +204,7 @@ export class NotificationService {
         let to: string | null = null;
         if (r.recipient_sealed) {
           to = unseal(key, Buffer.from(r.recipient_sealed, 'base64'), addressAad(r.id)).toString('utf8');
-        } else if (r.recipient_person && r.channel === 'SMS') {
+        } else if (r.recipient_person && (r.channel === 'SMS' || r.channel === 'WHATSAPP')) {
           const { rows } = await tx.query<{ phone_e164: string | null }>('SELECT phone_e164 FROM person WHERE id = $1', [r.recipient_person]);
           to = rows[0]?.phone_e164 ?? null;
         }
@@ -207,10 +217,11 @@ export class NotificationService {
           new Date(now.getTime() + NOTIFY_RETRY.leaseMs).toISOString(),
           now.toISOString(),
         ]);
-        return { result: { kind: 'SEND', to, text, channel: r.channel }, audit: { reasonCode: 'CLAIMED' } };
+        return { result: { kind: 'SEND', to, text, template: r.template, channel: r.channel }, audit: { reasonCode: 'CLAIMED' } };
       },
     };
 
+    const smsFallback = deps.smsFallback;
     this.recordCmd = {
       name: 'notification.record',
       async resolve(q, input) {
@@ -222,12 +233,38 @@ export class NotificationService {
         const r = await load(tx, input.id, true);
         if (r.status !== 'QUEUED' && r.status !== 'RETRY') throw new ConflictError('NOTIFICATION_FINAL');
         if (input.error === null) {
-          await tx.query("UPDATE notification SET status = 'SENT', sent_at = $2, next_attempt_at = NULL, last_error = NULL, updated_at = $2 WHERE id = $1", [r.id, now.toISOString()]);
+          await tx.query(
+            "UPDATE notification SET status = 'SENT', sent_at = $2, next_attempt_at = NULL, last_error = NULL, provider_ref = $3, updated_at = $2 WHERE id = $1",
+            [r.id, now.toISOString(), input.providerRef ?? null],
+          );
           return { result: { ...viewOf(r), status: 'SENT', lastError: null }, audit: { reasonCode: 'SENT' } };
         }
         const err = input.error.slice(0, 200);
         if (r.attempts >= NOTIFY_RETRY.maxAttempts) {
           await tx.query("UPDATE notification SET status = 'DEAD', next_attempt_at = NULL, last_error = $2, updated_at = $3 WHERE id = $1", [r.id, err, now.toISOString()]);
+          // WhatsApp down => SMS fallback (docs/09 Outage), once, only while channel.sms is on.
+          if (r.channel === 'WHATSAPP' && smsFallback && (await smsFallback(tx))) {
+            const params = JSON.parse(unseal(key, Buffer.from(r.params_sealed, 'base64'), paramsAad(r.id)).toString('utf8')) as Record<string, string>;
+            const to = r.recipient_sealed
+              ? { address: unseal(key, Buffer.from(r.recipient_sealed, 'base64'), addressAad(r.id)).toString('utf8') }
+              : { personId: r.recipient_person ?? '' };
+            const { rows: d } = await tx.query<{ wallet_id: string | null }>('SELECT wallet_id FROM notification WHERE id = $1', [r.id]);
+            await enqueueNotification(
+              tx,
+              key,
+              {
+                template: r.template as MessageKey,
+                channel: 'SMS',
+                to,
+                params,
+                dedupeKey: `sms-fallback:${r.id}`,
+                ...(d[0]?.wallet_id ? { walletId: d[0].wallet_id } : {}),
+                ...(isLocale(r.locale) ? { locale: r.locale } : {}),
+              },
+              now,
+            );
+            return { result: { ...viewOf(r), status: 'DEAD', lastError: err }, audit: { reasonCode: 'DEAD_SMS_FALLBACK' } };
+          }
           return { result: { ...viewOf(r), status: 'DEAD', lastError: err }, audit: { reasonCode: 'DEAD' } };
         }
         const delay = NOTIFY_RETRY.firstDelayMs * 2 ** Math.min(r.attempts - 1, 10);
@@ -248,16 +285,18 @@ export class NotificationService {
     if (claimed.kind === 'DONE') return claimed.view;
     const sender = this.deps.senders.find((s) => s.channel === claimed.channel);
     let error: string | null = null;
+    let providerRef: string | undefined;
     if (!sender) {
       error = `no ${claimed.channel} sender`;
     } else {
       try {
-        await sender.send(claimed.to, claimed.text);
+        const sent = await sender.send(claimed.to, claimed.text, { template: claimed.template });
+        if (sent && typeof sent.providerRef === 'string') providerRef = sent.providerRef.slice(0, 128);
       } catch (err) {
         error = err instanceof Error ? err.message : 'send failed';
       }
     }
-    return this.deps.bus.execute(this.recordCmd, { id, error }, { actor: SYSTEM_ACTOR });
+    return this.deps.bus.execute(this.recordCmd, { id, error, ...(providerRef ? { providerRef } : {}) }, { actor: SYSTEM_ACTOR });
   }
 
   /** Retry loop: deliver every QUEUED/RETRY notification that is due. */

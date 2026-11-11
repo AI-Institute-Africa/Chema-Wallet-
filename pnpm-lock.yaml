@@ -67,6 +67,9 @@ importers:
       '@chema/wallet':
         specifier: workspace:*
         version: link:../../packages/wallet
+      '@chema/whatsapp':
+        specifier: workspace:*
+        version: link:../../packages/whatsapp
       fastify:
         specifier: ^5.12.8
         version: 5.12.8
@@ -268,6 +271,40 @@ importers:
       '@types/qrcode':
         specifier: ^1.5.6
         version: 1.5.6
+
+  packages/whatsapp:
+    dependencies:
+      '@chema/channels':
+        specifier: workspace:*
+        version: link:../channels
+      '@chema/contributions':
+        specifier: workspace:*
+        version: link:../contributions
+      '@chema/core':
+        specifier: workspace:*
+        version: link:../core
+      '@chema/fidelity':
+        specifier: workspace:*
+        version: link:../fidelity
+      '@chema/payments':
+        specifier: workspace:*
+        version: link:../payments
+      '@chema/payouts':
+        specifier: workspace:*
+        version: link:../payouts
+      '@chema/providers':
+        specifier: workspace:*
+        version: link:../providers
+      '@chema/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@chema/wallet':
+        specifier: workspace:*
+        version: link:../wallet
+    devDependencies:
+      '@chema/ledger':
+        specifier: workspace:*
+        version: link:../ledger
 
 packages:
 

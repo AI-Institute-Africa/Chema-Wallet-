@@ -194,6 +194,9 @@ const EXPECTED: Record<Action, Persona[]> = {
   'wallet.close.finalise': ['admin', 'opsfin', 'fidelity_admin'],
   'wallet.thank_contributors': ['admin'],
   'wallet.statement.view': ['admin', 'approver', 'opsfin', 'auditor', 'fidelity_admin'],
+  'whatsapp.ingest': ['system'],
+  'whatsapp.process': ['system'],
+  'handoff.redeem': [...CUSTOMERS, 'public'],
 };
 
 describe('permission matrix — every cell', () => {

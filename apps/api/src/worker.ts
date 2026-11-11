@@ -17,11 +17,15 @@ import { WALLET_TOPICS } from '@chema/wallet';
 import { CLAIM_TOPICS, FIDELITY_EVENT_TOPIC } from '@chema/fidelity';
 import { PAYOUT_EVENT_TOPIC } from '@chema/payments';
 import { PAYOUT_TOPICS } from '@chema/payouts';
+import { MockSender } from '@chema/channels';
+import { WA_INBOUND_TOPIC } from '@chema/whatsapp';
+import { walletCommands } from '@chema/wallet';
 import { z } from 'zod';
 import { buildContributions } from './contributions';
 import { buildClaims } from './fidelity';
 import { buildPayments } from './payments';
 import { buildPayouts } from './payouts';
+import { buildWhatsApp, chooseWhatsAppProviders } from './whatsapp';
 
 const log = createLogger(process.env['LOG_LEVEL'] ?? 'info');
 const databaseUrl = process.env['DATABASE_URL'];
@@ -39,13 +43,29 @@ const queue = new BullMqJobQueue(redisUrl);
 const relay = new OutboxRelay(db, queue);
 
 const payments = await buildPayments(core);
+const publicBaseUrl = process.env['CHEMA_PUBLIC_BASE_URL'] ?? 'http://localhost:3000';
+// WhatsApp notifications go out through the chosen provider (simulator in dev, D16).
+const waProviders = await chooseWhatsAppProviders(core, process.env);
+for (const w of waProviders.warnings) log.warn(w);
 const contributions = buildContributions(core, payments.service, {
   secrets,
-  publicBaseUrl: process.env['CHEMA_PUBLIC_BASE_URL'] ?? 'http://localhost:3000',
+  publicBaseUrl,
+  senders: [new MockSender('SMS'), new MockSender('EMAIL'), ...(waProviders.sender ? [waProviders.sender] : [])],
 });
 
 const claims = buildClaims(core, secrets);
 const payouts = buildPayouts(core, payments.rails, secrets);
+const whatsapp = buildWhatsApp(core, {
+  secrets,
+  providers: waProviders.providers,
+  contributions: contributions.service,
+  wallets: walletCommands({ flags: core.flags, publicBaseUrl }),
+  payouts,
+  claims: claims.service,
+  publicBaseUrl,
+  portalUrl: process.env['CHEMA_PORTAL_URL'] ?? 'http://localhost:3001',
+});
+const InboundPayload = z.object({ inboundId: z.uuid() });
 
 const DocPayload = z.object({ documentId: z.uuid() });
 const EventPayload = z.object({ eventRowId: z.uuid() });
@@ -89,6 +109,11 @@ const outboxWorker = createOutboxWorker(redisUrl, {
     const { rail, providerRef, reference } = PayoutEventPayload.parse(payload);
     const r = await payouts.processEvent({ rail, providerRef, ...(reference ? { reference } : {}) });
     log.info({ outcome: r }, 'payout event');
+  },
+  // Stored WhatsApp message: run one orchestrator turn (idempotent: processed rows are skipped).
+  [WA_INBOUND_TOPIC]: async (payload) => {
+    const r = await whatsapp.process(InboundPayload.parse(payload).inboundId);
+    log.info({ outcome: r.outcome, replayed: r.replayed }, 'whatsapp message');
   },
   'document.scan': async (payload) => {
     const { documentId } = DocPayload.parse(payload);
@@ -164,6 +189,19 @@ async function notifyLoop(): Promise<void> {
       if (attempted) log.info({ attempted }, 'notification retries');
     } catch (err) {
       log.error({ err }, 'notification retry error');
+    }
+    await new Promise((r) => setTimeout(r, 60_000));
+  }
+}
+
+/** WhatsApp messages the queue never finished (crash between store and process). */
+async function whatsappLoop(): Promise<void> {
+  while (!stopping) {
+    try {
+      const { attempted } = await whatsapp.processPending();
+      if (attempted) log.info({ attempted }, 'whatsapp retries');
+    } catch (err) {
+      log.error({ err }, 'whatsapp retry error');
     }
     await new Promise((r) => setTimeout(r, 60_000));
   }
@@ -253,3 +291,4 @@ void reconLoop();
 void fidelityLoop();
 void payoutLoop();
 void governanceLoop();
+void whatsappLoop();

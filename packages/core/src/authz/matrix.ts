@@ -126,6 +126,10 @@ export const ACTIONS = [
   'wallet.close.finalise',
   'wallet.thank_contributors',
   'wallet.statement.view',
+  // P08 WhatsApp channel (docs/09).
+  'whatsapp.ingest',
+  'whatsapp.process',
+  'handoff.redeem',
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -309,6 +313,14 @@ export const MATRIX: Readonly<Record<Action, Cells>> = {
   'wallet.close.finalise': { admin: 'allow', opsfin: 'allow', fidelity_admin: 'allow' },
   'wallet.thank_contributors': { admin: 'allow' },
   'wallet.statement.view': { admin: 'allow', approver: 'allow', opsfin: 'allow', auditor: 'allow', fidelity_admin: 'allow' },
+  // -- P08 (docs/09) -- The WhatsApp pipeline stores and processes messages as
+  // SYSTEM; every business action it routes runs as the bound person (or a
+  // PUBLIC visitor) through the same commands as the web.
+  'whatsapp.ingest': { system: 'allow' },
+  'whatsapp.process': { system: 'allow' },
+  // Secure hand-off: the single-use token is the capability (checked in the
+  // guard); a LOGIN hand-off is redeemed before the person has a session.
+  'handoff.redeem': { contributor: 'allow', public: 'allow' },
 };
 
 /** Actions that need a fresh step-up grant (docs/02 Step-up). */

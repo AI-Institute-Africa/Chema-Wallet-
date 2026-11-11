@@ -19,6 +19,7 @@ import {
   issueStepUpGrant,
   revokeSession,
   sessionActor,
+  sessionActorById,
   type Clock,
   type IssuedSession,
   type StepUpTarget,
@@ -227,6 +228,11 @@ export class AuthService {
 
   async authenticate(token: string): Promise<Actor | null> {
     return sessionActor(this.deps.db, token, this.clock());
+  }
+
+  /** Live session held server-side (e.g. a bound WhatsApp conversation) → Actor, or null. */
+  async actorForSession(sessionId: string): Promise<Actor | null> {
+    return sessionActorById(this.deps.db, sessionId, this.clock());
   }
 
   async logout(actor: Actor): Promise<void> {

@@ -1,0 +1,25 @@
+{
+  "name": "@chema/whatsapp",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "WhatsApp channel (P08): webhook pipeline, sessions, deterministic orchestrator, secure hand-off. Thin: calls the same core services as the web.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/test-support.ts"
+  },
+  "dependencies": {
+    "@chema/channels": "workspace:*",
+    "@chema/contributions": "workspace:*",
+    "@chema/core": "workspace:*",
+    "@chema/fidelity": "workspace:*",
+    "@chema/payments": "workspace:*",
+    "@chema/payouts": "workspace:*",
+    "@chema/providers": "workspace:*",
+    "@chema/shared": "workspace:*",
+    "@chema/wallet": "workspace:*"
+  },
+  "devDependencies": {
+    "@chema/ledger": "workspace:*"
+  }
+}

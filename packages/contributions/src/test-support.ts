@@ -4,7 +4,7 @@
 // the same handlers the worker runs. Never import at runtime.
 import { randomUUID } from 'node:crypto';
 import { InMemoryJobQueue, OutboxRelay, ephemeralSecrets, publicActor, type Actor, type FlagKey, type Secrets } from '@chema/core';
-import { MockSender, NotificationService } from '@chema/channels';
+import { MockSender, NotificationService, SimulatorProvider, WhatsAppSender } from '@chema/channels';
 import { PaymentService, RailRegistry } from '@chema/payments';
 import { MockCard, MockEcoCash, MockOneMoney, type MockRail } from '@chema/providers';
 import { money, type SqlClient } from '@chema/shared';
@@ -15,6 +15,7 @@ import type { ContributeInput } from './types';
 
 export { PUBLIC_BASE };
 export const WEBHOOK_SECRET = 'test-webhook-secret-p05';
+export const WA_SIM_SECRET = 'test-whatsapp-secret-p08';
 
 export interface ContributionHarness extends WalletHarness {
   /** Platform secrets of this harness (notifications are sealed with secrets.dataKey). */
@@ -24,6 +25,8 @@ export interface ContributionHarness extends WalletHarness {
   notifications: NotificationService;
   sms: MockSender;
   email: MockSender;
+  /** WhatsApp simulator: notifications on channel WHATSAPP are sent through it (P08). */
+  whatsapp: SimulatorProvider;
   ecocash: MockRail;
   card: MockRail;
   /** Topic → payloads handled by pump() (events the worker only logs). */
@@ -62,7 +65,15 @@ export async function createContributionHarness(
   const contributions = new ContributionService({ db: h.db, bus: h.bus, flags: h.flags, payments, secrets, publicBaseUrl: PUBLIC_BASE, clock: h.now });
   const sms = new MockSender('SMS');
   const email = new MockSender('EMAIL');
-  const notifications = new NotificationService({ db: h.db, bus: h.bus, key: secrets.dataKey, senders: [sms, email], clock: h.now });
+  const whatsapp = new SimulatorProvider(WA_SIM_SECRET, h.now);
+  const notifications = new NotificationService({
+    db: h.db,
+    bus: h.bus,
+    key: secrets.dataKey,
+    senders: [sms, email, new WhatsAppSender(whatsapp)],
+    smsFallback: async (q) => (await h.flags.getIn(q, 'channel.sms')) === true,
+    clock: h.now,
+  });
   const queue = new InMemoryJobQueue();
   const relay = new OutboxRelay(h.db, queue);
   const done = new Set<string>();
@@ -76,6 +87,7 @@ export async function createContributionHarness(
     notifications,
     sms,
     email,
+    whatsapp,
     ecocash,
     card,
     events,
