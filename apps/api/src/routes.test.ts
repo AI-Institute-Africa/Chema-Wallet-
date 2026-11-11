@@ -21,7 +21,7 @@ let h: Harness;
 let app: FastifyInstance;
 beforeAll(async () => {
   h = await createHarness();
-  app = buildApp({ db: h.db, core: h, logger: createLogger('debug', sink) as FastifyBaseLogger });
+  app = buildApp({ db: h.db, core: h, logger: createLogger('debug', sink) as FastifyBaseLogger, rateLimit: false });
 });
 afterAll(async () => {
   await app.close();

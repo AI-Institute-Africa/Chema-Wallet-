@@ -105,6 +105,10 @@ const app = buildApp({
   // Browser origin(s) for CORS; defaults to the public web app + the admin portal.
   corsOrigins: parseOrigins(process.env['CHEMA_WEB_ORIGINS'] ?? `${publicBaseUrl},${portalUrl}`),
   version: process.env['APP_VERSION'] ?? '0.0.0',
+  // Behind a reverse proxy set CHEMA_TRUST_PROXY_HOPS (e.g. 1), or every client shares the proxy's rate-limit bucket.
+  ...(Number.parseInt(process.env['CHEMA_TRUST_PROXY_HOPS'] ?? '', 10) > 0
+    ? { trustProxy: Number.parseInt(process.env['CHEMA_TRUST_PROXY_HOPS'] ?? '', 10) }
+    : {}),
 });
 reportIdleDbError = (err) => app.log.warn({ err }, 'idle database connection lost');
 if (startupWarning) app.log.warn({ reason: startupWarning }, 'core services disabled: only health routes are served');

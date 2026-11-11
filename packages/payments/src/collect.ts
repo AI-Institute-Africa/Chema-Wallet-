@@ -127,8 +127,10 @@ export async function createPayment(tx: CommandTx, deps: PaymentDeps, actor: Act
 
   if (!(await deps.flags.getIn(tx, 'contributions.enabled'))) throw new ForbiddenError('CONTRIBUTIONS_DISABLED');
   // A disabled rail does not exist for callers.
-  if (!(await deps.rails.collectable(tx, input.rail))) throw new NotFoundError('rail', input.rail);
+  const adapter = await deps.rails.collectable(tx, input.rail);
+  if (!adapter) throw new NotFoundError('rail', input.rail);
   if (!(await deps.gate.canAccept(tx, input.walletId))) throw new ForbiddenError('WALLET_NOT_ACCEPTING_CONTRIBUTIONS');
+  if (adapter.mode === 'LIVE') await enforcePilotCaps(tx, deps, input);
 
   const quote = await quoteFees(tx, deps.flags, input.rail, input.amount, now);
   const { community } = await bootstrapWalletAccounts(tx, input.walletId, input.amount.ccy);
@@ -369,3 +371,25 @@ export const viewReceipt: Command<{ receiptId: string }, ReceiptView> = {
     };
   },
 };
+
+/**
+ * D19 pilot envelope for LIVE rails: one contribution ≤ `pilot.max_amount_minor`,
+ * and at most `pilot.max_wallets` distinct wallets ever take live money. The
+ * advisory lock serialises the wallet count so two new wallets cannot both
+ * slip under the cap. (`collectable` already refused if either cap is unset.)
+ */
+async function enforcePilotCaps(tx: CommandTx, deps: PaymentDeps, input: InitiateInput): Promise<void> {
+  const maxAmount = await deps.flags.getIn(tx, 'pilot.max_amount_minor');
+  const maxWallets = await deps.flags.getIn(tx, 'pilot.max_wallets');
+  if (maxAmount === null || maxWallets === null) throw new ForbiddenError('PILOT_NOT_CONFIGURED');
+  if (input.amount.minor > maxAmount) throw new ForbiddenError('PILOT_AMOUNT_CAP');
+  await tx.query("SELECT pg_advisory_xact_lock(hashtext('chema.pilot.wallets'))");
+  const live = deps.rails.liveRails();
+  const { rows } = await tx.query<{ n: string; mine: boolean }>(
+    `SELECT count(DISTINCT wallet_id)::text AS n, coalesce(bool_or(wallet_id = $2), false) AS mine
+       FROM payment WHERE rail = ANY($1::text[])`,
+    [live, input.walletId],
+  );
+  const n = BigInt(rows[0]?.n ?? '0');
+  if (!rows[0]?.mine && n >= BigInt(maxWallets)) throw new ForbiddenError('PILOT_WALLET_CAP');
+}

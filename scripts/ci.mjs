@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// `pnpm verify`: typecheck → lint → test → secret scan. Stops at first failure
+// `pnpm verify`: typecheck → lint → test → secret scan → scope audit → dependency audit (runtime deps, high+). Stops at first failure
 // and exits with that step's status (no pipes, so exit codes are real).
 import { spawnSync } from 'node:child_process';
 
-const steps = ['typecheck', 'lint', 'test', 'secret-scan'];
+const steps = ['typecheck', 'lint', 'test', 'secret-scan', 'scope-audit', 'dep-audit'];
 
 for (const name of steps) {
   console.log(`\n▶ ${name}`);

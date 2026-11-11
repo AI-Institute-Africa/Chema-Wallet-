@@ -16,6 +16,7 @@ import { registerFidelityRoutes } from './fidelity-routes';
 import { registerPaymentRoutes } from './payment-routes';
 import { registerPayoutRoutes } from './payout-routes';
 import { registerRoutes } from './routes';
+import { defaultRateLimitRules, registerRateLimit, registerSecurityHeaders, type RateLimitOptions } from './security';
 import { registerWalletRoutes, type WalletWiring } from './wallet-routes';
 import { registerWhatsAppRoutes } from './whatsapp-routes';
 
@@ -43,6 +44,10 @@ export interface AppOptions {
   metaVerifyToken?: string;
   /** Browser origins allowed to call the API (the web app). Empty ⇒ no CORS headers. */
   corsOrigins?: readonly string[];
+  /** Per-client rate limit; default = `defaultRateLimitRules()`. `false` only in tests that need volume. */
+  rateLimit?: RateLimitOptions | false;
+  /** Reverse-proxy hops to trust for the client IP (rate limits key on it). Default: none. */
+  trustProxy?: number;
 }
 
 const SAFE_REQUEST_ID = /^[A-Za-z0-9._-]{1,64}$/;
@@ -54,13 +59,35 @@ export function requestIdFor(req: IncomingMessage): string {
   return value && SAFE_REQUEST_ID.test(value) ? value : randomUUID();
 }
 
+export interface RouteInfo {
+  method: string;
+  url: string;
+}
+
+const ROUTES = new WeakMap<FastifyInstance, RouteInfo[]>();
+
+/** Every route the app registered (method × path), for the P10 authz/IDOR sweeps. */
+export function routesOf(app: FastifyInstance): readonly RouteInfo[] {
+  return ROUTES.get(app) ?? [];
+}
+
 export function buildApp(opts: AppOptions = {}): FastifyInstance {
   const app = Fastify({
     loggerInstance: opts.logger ?? (createLogger(process.env['LOG_LEVEL'] ?? 'info') as FastifyBaseLogger),
     genReqId: requestIdFor,
+    // Trust exactly N proxy hops for the client address (proxy-addr semantics).
+    trustProxy: opts.trustProxy ? (_addr: string, hop: number) => hop < (opts.trustProxy ?? 0) : false,
   });
 
+  const routes: RouteInfo[] = [];
+  ROUTES.set(app, routes);
+  app.addHook('onRoute', (r) => {
+    for (const method of [r.method].flat()) if (method !== 'HEAD') routes.push({ method, url: r.url });
+  });
+
+  registerSecurityHeaders(app);
   registerCors(app, opts.corsOrigins ?? []);
+  if (opts.rateLimit !== false) registerRateLimit(app, opts.rateLimit ?? { rules: defaultRateLimitRules() });
 
   app.addHook('onSend', async (req, reply) => {
     reply.header('x-request-id', req.id);

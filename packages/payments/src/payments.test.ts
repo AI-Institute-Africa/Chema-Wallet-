@@ -310,7 +310,7 @@ describe('§P payments (mock rails)', () => {
       ).rejects.toBeInstanceOf(NotFoundError);
       await expect(t2.service.receiveWebhook('CARD', {}, '{}')).rejects.toBeInstanceOf(NotFoundError);
       await expect(
-        t2.service.initiate(c.actor, { walletId: (await t2.newWallet()), rail: 'BANK', amount: usd(1_00n), idempotencyKey: key() }),
+        t2.service.initiate(c.actor, { walletId: (await t2.newWallet()), rail: 'BANK', amount: usd(1_00n), idempotencyKey: key() /* scope-audit:allow (absent rail) */ }),
       ).rejects.toBeInstanceOf(NotFoundError);
     } finally {
       await t2.close();

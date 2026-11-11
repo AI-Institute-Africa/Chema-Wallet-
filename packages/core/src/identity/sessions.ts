@@ -154,6 +154,10 @@ export class StepUpGrants implements StepUpConsumer {
       `UPDATE step_up_grant SET consumed_at = $6::timestamptz
         WHERE token_hash = $1 AND session_id = $2 AND action = $3 AND subject_type = $4 AND subject_id = $5
           AND consumed_at IS NULL AND expires_at > $6::timestamptz
+          -- The grant dies with its session: a revoked or expired session cannot spend it,
+          -- even through an Actor object captured before logout (P10 S8).
+          AND EXISTS (SELECT 1 FROM auth_session s
+                       WHERE s.id = step_up_grant.session_id AND s.revoked_at IS NULL AND s.expires_at > $6::timestamptz)
         RETURNING id`,
       [sha256Hex(token), actor.sessionId, action, subject.type, subject.id, now],
     );
