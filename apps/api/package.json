@@ -18,6 +18,7 @@
     "@chema/core": "workspace:*",
     "@chema/fidelity": "workspace:*",
     "@chema/ledger": "workspace:*",
+    "@chema/ops": "workspace:*",
     "@chema/payments": "workspace:*",
     "@chema/payouts": "workspace:*",
     "@chema/providers": "workspace:*",

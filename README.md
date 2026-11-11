@@ -17,13 +17,15 @@ curl localhost:7600/health     # liveness; /health/ready checks the DB
 pnpm db:migrate         # apply db/migrations to $DATABASE_URL
 pnpm audit:verify       # check the audit_log hash chain in $DATABASE_URL
 pnpm dev:worker         # outbox relay + job worker (needs REDIS_URL)
+pnpm staff:enroll --login admin.one --role FIDELITY_ADMIN   # bootstrap staff (prints password + TOTP secret once)
+pnpm dev:admin          # staff portal on :3001
 docker compose down
 ```
 
 ## Layout
-`apps/api` Fastify API · `apps/web`, `apps/admin` (later phases) ·
+`apps/api` Fastify API · `apps/web` public PWA · `apps/admin` staff portal (P09) · `runbooks/` ops procedures ·
 `packages/shared` Money, db + migrator, log masking, i18n ·
-`packages/core` identity, authz matrix, command bus, approvals, audit chain, consent, documents, outbox, flags · `packages/ledger|providers|channels|fidelity` (later phases) ·
+`packages/core` identity, authz matrix, command bus, approvals, audit chain, consent, documents, outbox, flags · `packages/ledger|payments|providers|channels|contributions|wallet|fidelity|payouts|whatsapp|ops` ·
 `db/migrations` plain SQL, checksum-verified · `tools/eslint-plugin-chema` invariant lint rules.
 
 ## Safety defaults

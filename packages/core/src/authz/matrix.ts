@@ -70,6 +70,7 @@ export const ACTIONS = [
   'config.change',
   'config.change.approve',
   'role.admin',
+  'role.admin.approve',
   'consent.manage',
   'consent.view',
   'document.upload',
@@ -130,6 +131,24 @@ export const ACTIONS = [
   'whatsapp.ingest',
   'whatsapp.process',
   'handoff.redeem',
+  // P09 admin portal, reconciliation, reports (docs/12).
+  'approval.queue',
+  'claim.queue',
+  'fraud_flag.queue',
+  'hold.register',
+  'recon.exception.assign',
+  'recon.exception.resolve',
+  'config.view',
+  'role.review',
+  'ops.failures.view',
+  'support.view',
+  'support.close',
+  'report.management',
+  'report.finance',
+  'report.agent',
+  'report.regulator',
+  'audit.explore',
+  'audit.verify',
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -206,7 +225,10 @@ export const MATRIX: Readonly<Record<Action, Cells>> = {
   'receipt.view_own': { contributor: 'own' },
   'config.change': { fidelity_admin: 'maker' },
   'config.change.approve': { fidelity_admin: 'checker' },
+  // Granting a privileged staff role (FIDELITY_ADMIN, OPS_FINANCE, AUDITOR) is
+  // "privileged access" (docs/12): the command makes it dual via an approval.
   'role.admin': { fidelity_admin: 'allow' },
+  'role.admin.approve': { fidelity_admin: 'checker' },
   'consent.manage': { contributor: 'own' },
   'consent.view': { contributor: 'own', auditor: 'allow', fidelity_admin: 'allow' },
   // Sensitive documents: uploader, the wallet admin, assigned case staff, audit.
@@ -321,6 +343,33 @@ export const MATRIX: Readonly<Record<Action, Cells>> = {
   // Secure hand-off: the single-use token is the capability (checked in the
   // guard); a LOGIN hand-off is redeemed before the person has a session.
   'handoff.redeem': { contributor: 'allow', public: 'allow' },
+  // -- P09 (docs/12) -- Portal read surfaces. Oversight roles see every case;
+  // claims officers / verifiers get queues filtered to their assignments in
+  // the query, and every row they open is re-authorised by its own action.
+  'approval.queue': { opsfin: 'allow', fidelity_admin: 'allow', auditor: 'allow' },
+  'claim.queue': { claims: 'allow', fidelity_admin: 'allow', auditor: 'allow' },
+  'fraud_flag.queue': { verifier: 'allow', fidelity_admin: 'allow', auditor: 'allow' },
+  'hold.register': { opsfin: 'allow', fidelity_admin: 'allow', auditor: 'allow' },
+  // Recon exceptions: ops/finance owns and resolves them; a held one is
+  // resolved only after its hold went through hold.release (dual).
+  'recon.exception.assign': { opsfin: 'allow' },
+  'recon.exception.resolve': { opsfin: 'allow' },
+  'config.view': { opsfin: 'allow', auditor: 'allow', fidelity_admin: 'allow' },
+  // Access review export (docs/12 queue 10).
+  'role.review': { auditor: 'allow', fidelity_admin: 'allow' },
+  // Dead notifications / Fidelity requests, failed WhatsApp messages.
+  'ops.failures.view': { opsfin: 'allow', auditor: 'allow', fidelity_admin: 'allow' },
+  // Human hand-off from WhatsApp (docs/12 Support).
+  'support.view': { claims: 'allow', opsfin: 'allow', fidelity_admin: 'allow', auditor: 'allow' },
+  'support.close': { claims: 'allow', opsfin: 'allow', fidelity_admin: 'allow' },
+  // Reports. KPIs only; no revenue or forecast figures exist to show.
+  'report.management': { fidelity_admin: 'allow', auditor: 'allow' },
+  'report.finance': { opsfin: 'allow', auditor: 'allow', fidelity_admin: 'allow' },
+  // Agents see their own activity (the query is scoped to the actor).
+  'report.agent': { agent: 'allow', fidelity_admin: 'allow', auditor: 'allow' },
+  'report.regulator': { auditor: 'allow', fidelity_admin: 'allow' },
+  'audit.explore': { opsfin: 'allow', auditor: 'allow', fidelity_admin: 'allow' },
+  'audit.verify': { auditor: 'allow', fidelity_admin: 'allow' },
 };
 
 /** Actions that need a fresh step-up grant (docs/02 Step-up). */
@@ -343,7 +392,32 @@ export const CHECKER_ACTION: Readonly<Partial<Record<Action, Action>>> = {
   'payout.override': 'payout.override.approve',
   'mandate.change': 'mandate.change.approve',
   'hold.release': 'hold.release.approve',
+  'role.admin': 'role.admin.approve',
 };
+
+/**
+ * High-risk staff actions (docs/12: financial release, ledger adjustments,
+ * privileged access, overrides, config) run only from an ADMIN-channel
+ * (portal) session. Staff sessions are always ADMIN today; this keeps it so
+ * if another staff channel is ever added.
+ */
+export const PORTAL_ONLY_ACTIONS: ReadonlySet<Action> = new Set<Action>([
+  'ledger.adjust',
+  'ledger.adjust.approve',
+  'config.change',
+  'config.change.approve',
+  'role.admin',
+  'role.admin.approve',
+  'hold.release',
+  'hold.release.approve',
+  'payout.override',
+  'payout.override.approve',
+  'payment.refund',
+  'payment.refund.approve',
+  'claim.route.unblock',
+  'claim.route.unblock.approve',
+  'recon.exception.resolve',
+]);
 
 /** Who an unavailable-approver escalation goes to, per maker action. */
 export const ESCALATION_ROLE: Readonly<Partial<Record<Action, 'OPS_FINANCE' | 'FIDELITY_ADMIN'>>> = {

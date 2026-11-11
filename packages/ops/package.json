@@ -1,0 +1,21 @@
+{
+  "name": "@chema/ops",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Admin portal back end (P09): queues, maker-checker commands, ledger adjustments, reports, audit explorer",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/test-support.ts"
+  },
+  "dependencies": {
+    "@chema/core": "workspace:*",
+    "@chema/ledger": "workspace:*",
+    "@chema/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@chema/whatsapp": "workspace:*",
+    "@chema/payouts": "workspace:*",
+    "@chema/providers": "workspace:*"
+  }
+}

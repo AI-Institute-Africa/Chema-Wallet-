@@ -41,5 +41,9 @@ jobs:
         run: pnpm --filter @chema/web build
         env:
           NEXT_TELEMETRY_DISABLED: '1'
+      - name: Build admin portal (Next.js)
+        run: pnpm --filter @chema/admin build
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
       - name: Dependency audit
         run: pnpm audit --audit-level high

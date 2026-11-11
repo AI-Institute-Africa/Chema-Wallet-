@@ -85,6 +85,11 @@ export class FlagService {
     return (await this.resolve(key, q)).value as FlagValue<K>;
   }
 
+  /** Value + where it came from, read through an open transaction (portal config view). */
+  async resolvedIn(q: Queryable, key: FlagKey): Promise<ResolvedFlag> {
+    return this.resolve(key, q);
+  }
+
   async isEnabled(key: { [K in FlagKey]: FlagValue<K> extends boolean ? K : never }[FlagKey]): Promise<boolean> {
     return (await this.get(key)) === true;
   }
@@ -166,43 +171,7 @@ export class FlagService {
     const encoded = this.encode(key, value);
 
     try {
-      await this.db.transaction(async (tx) => {
-        if (d.financial && opts.approvalId) {
-          await consumeApprovalFor(tx, actor.id, opts.approvalId, {
-            action: 'config.change',
-            subjectType: 'config_flag',
-            subjectId: key,
-            payload: flagApprovalPayload(key, encoded),
-          });
-        }
-        const { rows } = await tx.query<{ value: unknown }>(
-          'SELECT value FROM config_flag WHERE key = $1 FOR UPDATE',
-          [key],
-        );
-        const old = rows[0]?.value ?? null;
-        await tx.query(
-          `INSERT INTO config_flag (key, value, updated_at) VALUES ($1, $2::jsonb, now())
-           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
-          [key, JSON.stringify(encoded)],
-        );
-        await tx.query(
-          `INSERT INTO config_flag_change (key, old_value, new_value, actor_id, actor_role, approval_ref, reason)
-           VALUES ($1, $2::jsonb, $3::jsonb, $4, $5, $6, $7)`,
-          [key, JSON.stringify(old), JSON.stringify(encoded), actor.id, actor.role, opts.approvalId ?? null, reason],
-        );
-        await this.audit.record(
-          {
-            ...base,
-            authzResult: 'ALLOWED',
-            before: old,
-            after: encoded,
-            reasonCode: reason,
-            ...(opts.approvalId ? { approvalRef: opts.approvalId } : {}),
-            ts: new Date(),
-          },
-          tx,
-        );
-      });
+      await this.db.transaction((tx) => this.write(tx, key, encoded, actor, reason, opts.approvalId));
     } catch (err) {
       if (err instanceof ForbiddenError || err instanceof ConflictError || err instanceof NotFoundError) {
         await denyAudit(err instanceof NotFoundError ? 'APPROVAL_NOT_FOUND' : err.reason);
@@ -210,5 +179,86 @@ export class FlagService {
       }
       throw err;
     }
+  }
+
+  /**
+   * Same rules as set(), inside the caller's transaction (a bus command, P09
+   * portal). Throws instead of writing denial audit rows: the caller's
+   * transaction rolls back and the bus audits the failure.
+   */
+  async setIn<K extends FlagKey>(
+    tx: Queryable,
+    key: K,
+    value: FlagValue<K>,
+    actor: FlagActor,
+    reason: string,
+    opts: { approvalId?: string } = {},
+  ): Promise<{ before: unknown; after: unknown }> {
+    if (!isFlagKey(key)) throw new UnknownFlagError(key);
+    const d = def(key);
+    if (d.locked) throw new LockedFlagError(key);
+    if (d.financial && !opts.approvalId) throw new DualApprovalRequiredError(key);
+    const encoded = this.encode(key, value);
+    return this.write(tx, key, encoded, actor, reason, opts.approvalId);
+  }
+
+  /** Decode a value in its stored (JSON) form; portal input arrives this way. */
+  decodeStored<K extends FlagKey>(key: K, raw: unknown): FlagValue<K> {
+    if (!isFlagKey(key)) throw new UnknownFlagError(key);
+    try {
+      return def(key).decode(raw, 'db') as FlagValue<K>;
+    } catch (err) {
+      throw new FlagValueError(key, 'db', err);
+    }
+  }
+
+  private async write(
+    tx: Queryable,
+    key: FlagKey,
+    encoded: unknown,
+    actor: FlagActor,
+    reason: string,
+    approvalId: string | undefined,
+  ): Promise<{ before: unknown; after: unknown }> {
+    const d = def(key);
+    if (d.financial) {
+      if (!approvalId) throw new DualApprovalRequiredError(key);
+      await consumeApprovalFor(tx, actor.id, approvalId, {
+        action: 'config.change',
+        subjectType: 'config_flag',
+        subjectId: key,
+        payload: flagApprovalPayload(key, encoded),
+      });
+    }
+    const { rows } = await tx.query<{ value: unknown }>('SELECT value FROM config_flag WHERE key = $1 FOR UPDATE', [key]);
+    const old = rows[0]?.value ?? null;
+    await tx.query(
+      `INSERT INTO config_flag (key, value, updated_at) VALUES ($1, $2::jsonb, now())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+      [key, JSON.stringify(encoded)],
+    );
+    await tx.query(
+      `INSERT INTO config_flag_change (key, old_value, new_value, actor_id, actor_role, approval_ref, reason)
+       VALUES ($1, $2::jsonb, $3::jsonb, $4, $5, $6, $7)`,
+      [key, JSON.stringify(old), JSON.stringify(encoded), actor.id, actor.role, approvalId ?? null, reason],
+    );
+    await this.audit.record(
+      {
+        action: 'config_flag.set',
+        actorId: actor.id,
+        actorRole: actor.role,
+        channel: actor.channel ?? 'ADMIN',
+        subjectType: 'config_flag',
+        subjectId: key,
+        authzResult: 'ALLOWED',
+        before: old,
+        after: encoded,
+        reasonCode: reason,
+        ...(approvalId ? { approvalRef: approvalId } : {}),
+        ts: new Date(),
+      },
+      tx,
+    );
+    return { before: old, after: encoded };
   }
 }

@@ -17,5 +17,5 @@
     "noEmit": true
   },
   "include": ["apps/*/src/**/*.ts", "packages/*/src/**/*.ts", "tools/**/*.ts", "scripts/**/*.ts", "vitest.config.ts"],
-  "exclude": ["apps/web/**"]
+  "exclude": ["apps/web/**", "apps/admin/**"]
 }

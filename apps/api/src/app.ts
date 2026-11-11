@@ -2,12 +2,14 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { CoreServices } from '@chema/core';
 import type { ContributionService } from '@chema/contributions';
+import type { OpsService } from '@chema/ops';
 import type { ClaimsService } from '@chema/fidelity';
 import type { PaymentService } from '@chema/payments';
 import type { PayoutService } from '@chema/payouts';
 import type { WhatsAppService } from '@chema/whatsapp';
 import { createLogger, type SqlClient } from '@chema/shared';
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
+import { registerAdminRoutes } from './admin-routes';
 import { registerContributionRoutes } from './contribution-routes';
 import { registerCors } from './cors';
 import { registerFidelityRoutes } from './fidelity-routes';
@@ -35,6 +37,8 @@ export interface AppOptions {
   payouts?: PayoutService;
   /** WhatsApp channel + secure hand-off (P08); needs core. */
   whatsapp?: WhatsAppService;
+  /** Admin portal back end (P09); needs core. */
+  ops?: OpsService;
   /** Meta webhook subscription verify token (D16). Unset ⇒ the handshake is refused. */
   metaVerifyToken?: string;
   /** Browser origins allowed to call the API (the web app). Empty ⇒ no CORS headers. */
@@ -87,6 +91,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     if (contributions) registerContributionRoutes(app, opts.core, contributions);
     if (opts.claims) registerFidelityRoutes(app, opts.core, opts.claims);
     if (opts.payouts) registerPayoutRoutes(app, opts.core, opts.payouts);
+    if (opts.ops) registerAdminRoutes(app, opts.core, opts.ops);
     if (opts.whatsapp) registerWhatsAppRoutes(app, opts.core, opts.whatsapp, opts.metaVerifyToken ? { metaVerifyToken: opts.metaVerifyToken } : {});
   }
 

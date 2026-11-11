@@ -1,4 +1,5 @@
 import { createCoreServices, LocalFsBlobStore, loadSecrets, MockMalwareScanner, type CoreServices, type Secrets } from '@chema/core';
+import { OpsService } from '@chema/ops';
 import { createPgClient } from '@chema/shared';
 import { buildApp } from './app';
 import { walletCommands } from '@chema/wallet';
@@ -42,6 +43,8 @@ if (db) {
 
 // Base of the public web app for share links + QR codes (docs/05 Public activation).
 const publicBaseUrl = process.env['CHEMA_PUBLIC_BASE_URL'] ?? 'http://localhost:3000';
+// Admin portal (apps/admin, P09): WhatsApp hand-offs link to it and CORS allows it.
+const portalUrl = process.env['CHEMA_PORTAL_URL'] ?? 'http://localhost:3001';
 const ipHashKey = process.env['CHEMA_REPORT_IP_KEY'];
 const wallets: WalletWiring | undefined = core
   ? {
@@ -81,9 +84,11 @@ const whatsapp =
         payouts,
         ...(claims ? { claims: claims.service } : {}),
         publicBaseUrl,
-        portalUrl: process.env['CHEMA_PORTAL_URL'] ?? 'http://localhost:3001',
+        portalUrl,
       })
     : undefined;
+// P09: admin portal back end (queues, maker-checker, reports, audit explorer).
+const ops = core ? new OpsService(core) : undefined;
 const metaVerifyToken = process.env['CHEMA_META_VERIFY_TOKEN'];
 
 const app = buildApp({
@@ -95,9 +100,10 @@ const app = buildApp({
   ...(claims ? { claims: claims.service } : {}),
   ...(payouts ? { payouts } : {}),
   ...(whatsapp ? { whatsapp } : {}),
+  ...(ops ? { ops } : {}),
   ...(metaVerifyToken && metaVerifyToken.length >= 16 ? { metaVerifyToken } : {}),
-  // Web app origin(s) for CORS; defaults to the public web base URL.
-  corsOrigins: parseOrigins(process.env['CHEMA_WEB_ORIGINS'] ?? publicBaseUrl),
+  // Browser origin(s) for CORS; defaults to the public web app + the admin portal.
+  corsOrigins: parseOrigins(process.env['CHEMA_WEB_ORIGINS'] ?? `${publicBaseUrl},${portalUrl}`),
   version: process.env['APP_VERSION'] ?? '0.0.0',
 });
 reportIdleDbError = (err) => app.log.warn({ err }, 'idle database connection lost');
