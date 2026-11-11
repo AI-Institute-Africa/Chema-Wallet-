@@ -72,17 +72,35 @@ interface SessionRow {
   staff_disabled_at: Date | null;
 }
 
+const SESSION_SELECT = `SELECT s.id, s.person_id, s.kind, s.channel, s.mfa_at, s.ip, s.device_ref,
+            st.staff_role, st.disabled_at AS staff_disabled_at
+       FROM auth_session s LEFT JOIN staff_account st ON st.id = s.staff_id`;
+
 /** Bearer token → Actor, or null if unknown/expired/revoked/disabled. */
 export async function sessionActor(q: Queryable, token: string, now: Date): Promise<Actor | null> {
   if (token.length < 16 || token.length > 128) return null;
   const { rows } = await q.query<SessionRow>(
-    `SELECT s.id, s.person_id, s.kind, s.channel, s.mfa_at, s.ip, s.device_ref,
-            st.staff_role, st.disabled_at AS staff_disabled_at
-       FROM auth_session s LEFT JOIN staff_account st ON st.id = s.staff_id
-      WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > $2::timestamptz`,
+    `${SESSION_SELECT} WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > $2::timestamptz`,
     [sha256Hex(token), now.toISOString()],
   );
-  const row = rows[0];
+  return actorOf(rows[0]);
+}
+
+/**
+ * Session id → Actor, same checks as a bearer token. Only for server-held
+ * references (a WhatsApp conversation bound after an OTP login): never accept
+ * a session id from a client.
+ */
+export async function sessionActorById(q: Queryable, sessionId: string, now: Date): Promise<Actor | null> {
+  if (!/^[0-9a-f-]{36}$/i.test(sessionId)) return null;
+  const { rows } = await q.query<SessionRow>(
+    `${SESSION_SELECT} WHERE s.id = $1 AND s.revoked_at IS NULL AND s.expires_at > $2::timestamptz`,
+    [sessionId, now.toISOString()],
+  );
+  return actorOf(rows[0]);
+}
+
+function actorOf(row: SessionRow | undefined): Actor | null {
   if (!row) return null;
   if (row.kind === 'STAFF' && (row.staff_role === null || row.staff_disabled_at !== null)) return null;
   return {

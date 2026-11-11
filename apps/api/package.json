@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
-    "worker": "tsx src/worker.ts"
+    "worker": "tsx src/worker.ts",
+    "wa:sim": "tsx src/wa-sim.ts"
   },
   "dependencies": {
     "@chema/channels": "workspace:*",
@@ -22,6 +23,7 @@
     "@chema/providers": "workspace:*",
     "@chema/shared": "workspace:*",
     "@chema/wallet": "workspace:*",
+    "@chema/whatsapp": "workspace:*",
     "fastify": "^5.12.8",
     "zod": "^4.6.7"
   }

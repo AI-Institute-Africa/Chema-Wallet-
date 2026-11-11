@@ -31,6 +31,8 @@ export function buildContributions(
     bus: core.bus,
     key: opts.secrets.dataKey,
     senders: opts.senders ?? [new MockSender('SMS'), new MockSender('EMAIL')],
+    // WhatsApp down => SMS fallback (docs/09 Outage), only while channel.sms is on.
+    smsFallback: async (q) => (await core.flags.getIn(q, 'channel.sms')) === true,
     ...clock,
   });
   return { service, notifications };

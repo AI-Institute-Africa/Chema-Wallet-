@@ -8,6 +8,7 @@ import { buildClaims, type ClaimsWiring } from './fidelity';
 import { chooseOtpProvider } from './otp';
 import { buildPayments, type PaymentsWiring } from './payments';
 import { buildPayouts } from './payouts';
+import { buildWhatsApp, chooseWhatsAppProviders } from './whatsapp';
 import type { WalletWiring } from './wallet-routes';
 
 const port = Number(process.env['PORT'] ?? 7600);
@@ -68,6 +69,23 @@ const claims: ClaimsWiring | undefined = core && secrets ? buildClaims(core, sec
 // P07: payouts, governance, closure (payouts.enabled + rail flags off by default).
 const payouts = core && payments && secrets ? buildPayouts(core, payments.rails, secrets) : undefined;
 
+// P08: WhatsApp channel (simulator outside production; Meta stub behind channel.whatsapp, D16).
+const waProviders = core ? await chooseWhatsAppProviders(core, process.env) : undefined;
+const whatsapp =
+  core && secrets && contributions && payouts && wallets && waProviders
+    ? buildWhatsApp(core, {
+        secrets,
+        providers: waProviders.providers,
+        contributions: contributions.service,
+        wallets: wallets.commands,
+        payouts,
+        ...(claims ? { claims: claims.service } : {}),
+        publicBaseUrl,
+        portalUrl: process.env['CHEMA_PORTAL_URL'] ?? 'http://localhost:3001',
+      })
+    : undefined;
+const metaVerifyToken = process.env['CHEMA_META_VERIFY_TOKEN'];
+
 const app = buildApp({
   ...(db ? { db } : {}),
   ...(core ? { core } : {}),
@@ -76,6 +94,8 @@ const app = buildApp({
   ...(contributions ? { contributions: contributions.service } : {}),
   ...(claims ? { claims: claims.service } : {}),
   ...(payouts ? { payouts } : {}),
+  ...(whatsapp ? { whatsapp } : {}),
+  ...(metaVerifyToken && metaVerifyToken.length >= 16 ? { metaVerifyToken } : {}),
   // Web app origin(s) for CORS; defaults to the public web base URL.
   corsOrigins: parseOrigins(process.env['CHEMA_WEB_ORIGINS'] ?? publicBaseUrl),
   version: process.env['APP_VERSION'] ?? '0.0.0',
@@ -83,6 +103,7 @@ const app = buildApp({
 reportIdleDbError = (err) => app.log.warn({ err }, 'idle database connection lost');
 if (startupWarning) app.log.warn({ reason: startupWarning }, 'core services disabled: only health routes are served');
 if (core) app.log.warn(`${otpChoice.warning}; malware scanning is a MOCK`);
+for (const w of waProviders?.warnings ?? []) app.log.warn(w);
 if (claims) app.log.warn(claims.mock ? 'Fidelity adapter is a MOCK (D14)' : 'Fidelity adapter is the unconfigured stub (D14): claim calls answer 503');
 if (payments) {
   app.log.warn('payment rails are MOCKS; contributions are accepted only into verified ACTIVE wallets');

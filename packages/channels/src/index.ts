@@ -1,4 +1,6 @@
-// @chema/channels — delivery channels. P05: notification service skeleton
-// (template + queue + retry + status) with mock web/email/SMS senders.
-// WhatsApp lands in P08.
+// @chema/channels — delivery channels: notification service (template + queue
+// + retry + status) with web/email/SMS/WhatsApp senders, and the WhatsApp
+// provider boundary (simulator + Meta stub, P08). No business logic here.
 export * from './notify/service';
+export * from './whatsapp/provider';
+export * from './whatsapp/templates';

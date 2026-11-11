@@ -15,7 +15,8 @@
     "db:migrate": "tsx packages/shared/src/db/cli.ts",
     "dev:api": "pnpm --filter @chema/api dev",
     "audit:verify": "tsx packages/core/src/audit/verify-cli.ts",
-    "dev:worker": "pnpm --filter @chema/api worker"
+    "dev:worker": "pnpm --filter @chema/api worker",
+    "wa:sim": "pnpm --filter @chema/api wa:sim"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
