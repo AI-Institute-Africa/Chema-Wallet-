@@ -1,6 +1,7 @@
 // P07 payouts, governance, disputes, refunds, closure (docs/08, docs/02,
 // docs/14 §G §O) on mock rails + MockFidelity, through the real commands.
-import { ConflictError, ForbiddenError, decideApproval, grantConsent } from '@chema/core';
+import { CASE_SLA_DEFAULT_HOURS, ConflictError, ForbiddenError, decideApproval, grantConsent } from '@chema/core';
+import { caseSlaHours, exceptionSlaHours } from '@chema/payments';
 import { getBalances } from '@chema/ledger';
 import { money } from '@chema/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -388,7 +389,8 @@ describe('§O operations', () => {
     expect(await status(id2)).toBe('RAIL_DOWN');
     expect((await community(w.walletId)).reserved).toBe(30_00n); // still set aside, never lost
     const ops = await t.h.staff('OPS_FINANCE');
-    const evidence = await t.upload(w.admin.actor, w.walletId, 'OTHER');
+    // Ops/finance uploads its own proof (class OVERRIDE_EVIDENCE: allowed only while a payout is on a down rail).
+    const evidence = await t.upload(ops.actor, w.walletId, 'OVERRIDE_EVIDENCE');
     const o = await t.payouts.run(ops.actor, t.payouts.payouts.override, { payoutId: id2, externalRef: 'MANUAL-TT-55102', documentId: evidence });
     await expect(t.h.bus.execute(decideApproval, { approvalId: o.approvalId, decision: 'APPROVED' }, { actor: ops.actor })).rejects.toBeInstanceOf(ForbiddenError);
     const ops2 = await t.h.staff('OPS_FINANCE');
@@ -456,6 +458,51 @@ describe('§O operations', () => {
     t.h.advance(25 * HOUR);
     expect((await t.payouts.sweep()).exceptionsEscalated).toBeGreaterThanOrEqual(1);
     await expect(t.h.db.query('UPDATE recon_exception SET escalation_level = 0')).rejects.toThrow(/only rises/);
+  });
+});
+
+describe('§O SLA thresholds from config (D09: recon.exception_sla_hours.*, case.sla_hours.*)', () => {
+  const ADMIN = { id: 'staff-sla-admin', role: 'FIDELITY_ADMIN', channel: 'ADMIN' };
+
+  it('unset ⇒ the built-in hours, identical to the database case_sla_hours() defaults', async () => {
+    const { rows } = await t.h.db.query<{ t: string; h: number }>(
+      `SELECT t, case_sla_hours(t) AS h FROM unnest(ARRAY['CHARGEBACK','REFUND','RECON','FRAUD','BENEFICIARY_MISMATCH','AUTHORITY_DISPUTE','PAYMENT_DISPUTE','PROVIDER_DISPUTE']) AS t`,
+    );
+    const db = Object.fromEntries(rows.map((r) => [r.t.toLowerCase(), r.h]));
+    expect(db).toEqual({ ...CASE_SLA_DEFAULT_HOURS });
+    const hours = await t.h.db.transaction((tx) => caseSlaHours(tx, t.h.flags));
+    expect(hours['PROVIDER_DISPUTE']).toBe(168);
+    expect(await t.h.db.transaction((tx) => exceptionSlaHours(tx, t.h.flags))).toEqual({ HIGH: 24, MEDIUM: 72, LOW: 168 });
+  });
+
+  it('a configured case SLA re-bases open cases and sets the next window after escalation', async () => {
+    const w = await setup(10_00n);
+    await t.h.flags.set('case.sla_hours.provider_dispute', 2, ADMIN, 'D09 agreed: provider disputes within 2 hours');
+    const c = await t.payouts.run(w.admin.actor, t.payouts.governance.open, { walletId: w.walletId, type: 'PROVIDER_DISPUTE', summary: 'EcoCash says the payment never arrived.' });
+    t.h.advance(1 * HOUR);
+    expect((await t.payouts.sweep()).casesEscalated).toBe(0);
+    const fa = await t.fidelityAdmin();
+    const before = await t.payouts.run(fa.actor, t.payouts.governance.view, { caseId: c.id });
+    expect(new Date(before.slaDueAt).getTime() - new Date(before.openedAt).getTime()).toBe(2 * HOUR);
+    t.h.advance(90 * 60_000);
+    expect((await t.payouts.sweep()).casesEscalated).toBe(1);
+    const v = await t.payouts.run(fa.actor, t.payouts.governance.view, { caseId: c.id });
+    expect(v).toMatchObject({ status: 'ESCALATED', escalationLevel: 1 });
+    expect(new Date(v.slaDueAt).getTime() - t.h.now().getTime()).toBe(2 * HOUR);
+  });
+
+  it('a configured exception SLA ages recon exceptions: shorter escalates sooner, longer later', async () => {
+    await setup(10_00n);
+    const ops = await t.h.staff('OPS_FINANCE');
+    for (const sev of ['high', 'medium', 'low'] as const) await t.h.flags.set(`recon.exception_sla_hours.${sev}`, 500, ADMIN, 'D09 agreed: longer window');
+    t.ecocash.addSettlementRow('2026-11-01', { providerRef: 'ECOCASH-UNKNOWN-2', gross: usd(5_00n), fee: usd(0n), merchantRef: t.ecocash.merchantRef });
+    await t.payments.runRecon(ops.actor, 'ECOCASH', '2026-11-01');
+    t.h.advance(200 * HOUR); // past every built-in SLA, inside the configured one
+    expect((await t.payouts.sweep()).exceptionsEscalated).toBe(0);
+    for (const sev of ['high', 'medium', 'low'] as const) await t.h.flags.set(`recon.exception_sla_hours.${sev}`, 2, ADMIN, 'D09 agreed: short window');
+    expect((await t.payouts.sweep()).exceptionsEscalated).toBeGreaterThanOrEqual(1);
+    const { rows } = await t.h.db.query<{ sla_due_at: Date; escalation_level: number }>('SELECT sla_due_at, escalation_level FROM recon_exception WHERE escalation_level > 0');
+    for (const r of rows) expect(new Date(r.sla_due_at).getTime() - t.h.now().getTime()).toBe(2 * HOUR);
   });
 });
 

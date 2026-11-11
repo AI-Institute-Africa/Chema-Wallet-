@@ -18,6 +18,7 @@ import {
 } from '@chema/payouts';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { deviceOf } from './session';
 
 const Uuid = z.uuid();
 const Minor = z.string().regex(/^[1-9][0-9]{0,15}$/);
@@ -42,7 +43,7 @@ export function registerPayoutRoutes(app: FastifyInstance, core: CoreServices, p
   async function requireActor(req: FastifyRequest, reply: FastifyReply): Promise<void> {
     const h = req.headers.authorization;
     const token = h?.startsWith('Bearer ') ? h.slice(7).trim() : undefined;
-    const actor = token ? await core.auth.authenticate(token) : null;
+    const actor = token ? await core.auth.authenticate(token, { device: deviceOf(req) }) : null;
     if (!actor) {
       await reply.code(401).send({ error: 'unauthenticated' });
       return;

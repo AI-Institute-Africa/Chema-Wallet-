@@ -14,6 +14,7 @@ import {
   type Command,
   type CommandTx,
   type FlagService,
+  type WalletRoleName,
 } from '@chema/core';
 import { bootstrapWalletAccounts } from '@chema/ledger';
 import type { Locale, Queryable } from '@chema/shared';
@@ -256,7 +257,13 @@ async function isParty(q: Queryable, personId: string, w: WalletRow, c: CaseRow)
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
 
-function caseView(c: CaseRow): CaseView {
+/** submittedAt + `verification.sla_hours` for an undecided case; null when no SLA is set (D05: none promised). */
+export function verificationDueBy(submittedAt: Date, decided: boolean, slaHours: number | null): string | null {
+  if (decided || slaHours === null || slaHours < 1) return null;
+  return new Date(submittedAt.getTime() + slaHours * 3_600_000).toISOString();
+}
+
+function caseView(c: CaseRow, slaHours: number | null): CaseView {
   return {
     id: c.id,
     submittedAt: c.submitted_at.toISOString(),
@@ -264,6 +271,7 @@ function caseView(c: CaseRow): CaseView {
     outcome: c.outcome,
     reasonCode: c.reason_code,
     decidedAt: iso(c.decided_at),
+    dueBy: verificationDueBy(c.submitted_at, c.outcome !== null, slaHours),
   };
 }
 
@@ -302,7 +310,7 @@ export async function walletView(q: Queryable, deps: WalletDeps, walletId: strin
     publicSlug: active ? w.public_slug : null,
     share: url ? shareLinks(w.deceased_name, url, deps.locale) : null,
     evidence,
-    latestCase: last ? caseView(last) : null,
+    latestCase: last ? caseView(last, await deps.flags.getIn(q, 'verification.sla_hours')) : null,
     canAppeal: w.status === 'VERIFICATION_REJECTED' && last?.outcome === 'REJECTED',
   };
   if (opts.staff) {
@@ -364,6 +372,12 @@ export interface DecideInput {
   notes?: string;
 }
 
+export interface WalletPerson {
+  personId: string;
+  name: string | null;
+  roles: Exclude<WalletRoleName, 'AGENT'>[];
+}
+
 export interface QueueItem {
   caseId: string;
   walletId: string;
@@ -372,6 +386,10 @@ export interface QueueItem {
   appealOf: string | null;
   openFraudFlags: number;
   assignedVerifiers: string[];
+  /** Decision due (submittedAt + `verification.sla_hours`); null ⇒ no SLA set. */
+  dueBy: string | null;
+  /** dueBy has passed (oldest-first ordering is unchanged; nothing escalates automatically). */
+  overdue: boolean;
 }
 
 // ── Commands ────────────────────────────────────────────────────────────────
@@ -672,8 +690,15 @@ export function walletCommands(deps: WalletDeps) {
           ORDER BY c.submitted_at, c.id`,
         [mine ? actor.personId : null],
       );
+      const sla = await deps.flags.getIn(tx, 'verification.sla_hours');
+      const now = (deps.clock ?? (() => new Date()))();
+      const dueOf = (submitted: Date) => {
+        const dueBy = verificationDueBy(submitted, false, sla);
+        return { dueBy, overdue: dueBy !== null && Date.parse(dueBy) <= now.getTime() };
+      };
       return {
         result: rows.map((r) => ({
+          ...dueOf(r.submitted_at),
           caseId: r.id,
           walletId: r.wallet_id,
           deceasedName: r.deceased_name,
@@ -852,7 +877,31 @@ export function walletCommands(deps: WalletDeps) {
     },
   };
 
+  /**
+   * Who is on this wallet, for the family (admin / approver only): person id,
+   * the name the person gave (may be null), the family roles each holds. No
+   * phone numbers or national IDs; agent rows are staff and not listed.
+   * The family needs the ids to nominate a claim recipient or bind a payee.
+   */
+  const people: Command<{ walletId: string }, WalletPerson[]> = {
+    name: 'wallet.people',
+    async resolve(q, input) {
+      return { action: 'wallet.people.view', subject: walletSubject(await loadWallet(q, input.walletId)) };
+    },
+    async run(tx, input) {
+      const { rows } = await tx.query<{ person_id: string; name: string | null; roles: string[] }>(
+        `SELECT r.person_id, p.name, array_agg(r.role ORDER BY r.role) AS roles
+           FROM wallet_role r JOIN person p ON p.id = r.person_id
+          WHERE r.wallet_id = $1 AND r.revoked_at IS NULL AND r.role <> 'AGENT'
+          GROUP BY r.person_id, p.name ORDER BY min(r.created_at), r.person_id`,
+        [input.walletId],
+      );
+      return { result: rows.map((r) => ({ personId: r.person_id, name: r.name, roles: r.roles as WalletPerson['roles'] })) };
+    },
+  };
+
   return {
+    people,
     createDraft,
     view,
     addEvidence,

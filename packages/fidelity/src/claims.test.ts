@@ -1,7 +1,7 @@
 // P06 Fidelity claims link (docs/07, docs/14 §C) on MockFidelity.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { ConflictError, ForbiddenError, NotFoundError, SYSTEM_ACTOR, decideApproval } from '@chema/core';
+import { ConflictError, ForbiddenError, NotFoundError, RefusedError, SYSTEM_ACTOR, decideApproval } from '@chema/core';
 import { BenefitSourceError, ensureSystemAccount, getBalances, post } from '@chema/ledger';
 import { WebhookRejectedError } from '@chema/providers';
 import { money } from '@chema/shared';
@@ -93,6 +93,33 @@ describe('§C claim lifecycle', () => {
     const again = await t.claims.linkClaim(c.admin.actor, { walletId: c.walletId, recipientPersonId: c.admin.personId, recipientIdNumber: c.recipientId });
     expect(again.linked).toBe(true);
     expect(t.fidelity.calls.filter((x) => x.op === 'createOrLinkClaim')).toHaveLength(1);
+  });
+
+  it('re-linking a lodged claim to a different recipient is refused (audited); the same recipient stays idempotent', async () => {
+    const c = await t.linkedCase();
+    const other = await t.h.customer();
+    await t.h.grantRole(c.walletId, other.personId, 'APPROVER');
+    for (const attempt of [
+      { recipientPersonId: other.personId, recipientIdNumber: c.recipientId },
+      { recipientPersonId: c.admin.personId, recipientIdNumber: '63-999999Z42' },
+    ]) {
+      const err = await t.claims.linkClaim(c.admin.actor, { walletId: c.walletId, ...attempt }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(RefusedError);
+      expect((err as RefusedError).reason).toBe('RECIPIENT_CHANGE_REFUSED');
+    }
+    const { rows: denied } = await t.h.db.query<{ reason_code: string }>(
+      "SELECT reason_code FROM audit_log WHERE action = 'claim.link' AND actor_id = $1 AND authz_result = 'DENIED' ORDER BY audit_log.seq",
+      [c.admin.personId],
+    );
+    expect(denied.map((d) => d.reason_code)).toEqual(['RECIPIENT_CHANGE_REFUSED', 'RECIPIENT_CHANGE_REFUSED']);
+    expect(await link(c.walletId)).toMatchObject({ link_state: 'LINKED', proposed_recipient: c.admin.personId });
+    const again = await t.claims.linkClaim(c.admin.actor, { walletId: c.walletId, recipientPersonId: c.admin.personId, recipientIdNumber: c.recipientId });
+    expect(again.linked).toBe(true);
+    const { rows: ok } = await t.h.db.query<{ reason_code: string }>(
+      "SELECT reason_code FROM audit_log WHERE action = 'claim.link' AND actor_id = $1 AND authz_result = 'ALLOWED' ORDER BY audit_log.seq DESC LIMIT 1",
+      [c.admin.personId],
+    );
+    expect(ok[0]!.reason_code).toBe('ALREADY_LINKED');
   });
 
   it('duplicate claim is surfaced from Fidelity, never overridden', async () => {
@@ -240,6 +267,22 @@ describe('§C beneficiary mismatch ⇒ route blocked', () => {
     expect(done.status).toBe('UNBLOCKED');
     expect(await link(c.walletId)).toMatchObject({ route_status: 'APPROVED', route_approval_ref: req.approvalId, external_approval_ref: 'LCF-2026-0042' });
     expect(await bal(c.walletId, 'FIDELITY_BENEFIT')).toEqual({ settled: 400_00n, held: 0n, available: 400_00n });
+    // The person the written approval names becomes the PAYOUT_RECIPIENT; Fidelity named someone else as
+    // the policy beneficiary, so nobody in Chema is recorded as POLICY_BENEFICIARY (never inferred).
+    const { rows: roles } = await t.h.db.query<{ person_id: string; role: string; grant_source: string | null; granted_by: string | null }>(
+      "SELECT person_id, role, grant_source, granted_by FROM wallet_role WHERE wallet_id = $1 AND role IN ('PAYOUT_RECIPIENT', 'POLICY_BENEFICIARY') AND revoked_at IS NULL",
+      [c.walletId],
+    );
+    expect(roles).toEqual([{ person_id: c.admin.personId, role: 'PAYOUT_RECIPIENT', grant_source: 'ROUTE_UNBLOCK', granted_by: officer.personId }]);
+  });
+
+  it('a blocked route grants no recipient or beneficiary role', async () => {
+    const c = await blocked();
+    const { rows } = await t.h.db.query(
+      "SELECT 1 FROM wallet_role WHERE wallet_id = $1 AND role IN ('PAYOUT_RECIPIENT', 'POLICY_BENEFICIARY')",
+      [c.walletId],
+    );
+    expect(rows).toHaveLength(0);
   });
 
   it('the DB refuses to unblock without a consumed approval, or to credit early', async () => {

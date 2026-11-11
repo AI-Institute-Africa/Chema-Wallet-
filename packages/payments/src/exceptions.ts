@@ -1,5 +1,6 @@
 // Recon exceptions and case stubs (docs/04 §7, §8). Raising is idempotent
 // (dedup_key), so redelivered events and re-run recon never duplicate work.
+import { CASE_SLA_DEFAULT_HOURS, EXCEPTION_SLA_DEFAULT_HOURS, type FlagService } from '@chema/core';
 import type { Currency, Queryable } from '@chema/shared';
 
 export type ExceptionKind =
@@ -20,8 +21,32 @@ export type ExceptionKind =
 
 export type Severity = 'LOW' | 'MEDIUM' | 'HIGH';
 
-/** ASSUMPTION (D09 unresolved): target SLA per severity; P09 makes these configurable. */
-export const SLA_HOURS: Readonly<Record<Severity, number>> = { HIGH: 24, MEDIUM: 72, LOW: 168 };
+/** ASSUMPTION (D09 unresolved): built-in SLA per severity, used at creation; flags `recon.exception_sla_hours.*` override it for ageing. */
+export const SLA_HOURS: Readonly<Record<Severity, number>> = {
+  HIGH: EXCEPTION_SLA_DEFAULT_HOURS.high,
+  MEDIUM: EXCEPTION_SLA_DEFAULT_HOURS.medium,
+  LOW: EXCEPTION_SLA_DEFAULT_HOURS.low,
+};
+
+const atLeastOne = (v: number | null, dflt: number) => (v === null ? dflt : Math.max(1, v));
+
+/** Effective exception SLA hours per severity (flag, else built-in). Read through the caller's tx. */
+export async function exceptionSlaHours(q: Queryable, flags: FlagService): Promise<Record<Severity, number>> {
+  return {
+    HIGH: atLeastOne(await flags.getIn(q, 'recon.exception_sla_hours.high'), SLA_HOURS.HIGH),
+    MEDIUM: atLeastOne(await flags.getIn(q, 'recon.exception_sla_hours.medium'), SLA_HOURS.MEDIUM),
+    LOW: atLeastOne(await flags.getIn(q, 'recon.exception_sla_hours.low'), SLA_HOURS.LOW),
+  };
+}
+
+/** Effective case SLA hours per case type (flag `case.sla_hours.<type>`, else built-in = SQL case_sla_hours()). */
+export async function caseSlaHours(q: Queryable, flags: FlagService): Promise<Record<CaseType, number>> {
+  const out = {} as Record<CaseType, number>;
+  for (const [type, dflt] of Object.entries(CASE_SLA_DEFAULT_HOURS) as [keyof typeof CASE_SLA_DEFAULT_HOURS, number][]) {
+    out[type.toUpperCase() as CaseType] = atLeastOne(await flags.getIn(q, `case.sla_hours.${type}`), dflt);
+  }
+  return out;
+}
 /** ASSUMPTION: exceptions land in the ops/finance queue until P09 assigns a named owner. */
 export const EXCEPTION_OWNER_ROLE = 'OPS_FINANCE';
 

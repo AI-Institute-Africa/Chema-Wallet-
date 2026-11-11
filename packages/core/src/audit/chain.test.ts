@@ -1,6 +1,11 @@
+import { randomUUID } from 'node:crypto';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { SqlClient } from '@chema/shared';
 import { migratedTestDb } from '@chema/shared/testing';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { anchorHead, FileAnchorSink, parseAnchors, verifyChainWithAnchors } from './anchor';
 import { appendAudit, GENESIS_HASH, verifyChain } from './chain';
 import { DbAuditSink, type AuditEvent } from './sink';
 
@@ -140,5 +145,69 @@ describe('audit_log is append-only (triggers)', () => {
       }),
     ).rejects.toThrow('handler failed');
     expect(await verifyChain(db)).toMatchObject({ ok: true, count: 2 });
+  });
+});
+
+describe('external anchoring of the chain head (truncation of the newest rows)', () => {
+  let dir: string;
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'chema-anchor-'));
+  });
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const sinkFile = () => new FileAnchorSink(join(dir, `${randomUUID()}.jsonl`));
+
+  it('anchors the head once per change, append-only JSONL', async () => {
+    const sink = sinkFile();
+    expect(await anchorHead(db, sink, new Date())).toBeNull(); // empty chain: nothing to anchor
+    await seed(3);
+    const a = await anchorHead(db, sink, new Date('2026-11-11T10:00:00Z'));
+    expect(a).toMatchObject({ seq: '3', anchoredAt: '2026-11-11T10:00:00.000Z' });
+    expect(await anchorHead(db, sink, new Date())).toBeNull(); // unchanged head
+    await seed(1);
+    await anchorHead(db, sink, new Date());
+    const lines = readFileSync(sink.path, 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(2);
+    expect((await sink.readAll()).map((x) => x.seq)).toEqual(['3', '4']);
+  });
+
+  it('truncating rows after an anchor verifies as a chain, but fails against the anchor', async () => {
+    await seed(6);
+    const sink = sinkFile();
+    await anchorHead(db, sink, new Date());
+    await asSuperuser('DELETE FROM audit_log WHERE seq > 4');
+    // The shortened chain is internally consistent: verifyChain alone cannot tell.
+    expect(await verifyChain(db)).toMatchObject({ ok: true, count: 4 });
+    expect(await verifyChainWithAnchors(db, await sink.readAll())).toEqual({ ok: false, count: 4, seq: '6', problem: 'TRUNCATED' });
+  });
+
+  it('a consistent rewrite of the tail (re-appended rows) disagrees with the anchored hash', async () => {
+    await seed(5);
+    const sink = sinkFile();
+    await anchorHead(db, sink, new Date());
+    await asSuperuser('DELETE FROM audit_log WHERE seq >= 4');
+    const forger = new DbAuditSink(db);
+    await forger.record(ev(40, { actorId: 'mallory' }));
+    await forger.record(ev(41, { actorId: 'mallory' }));
+    expect(await verifyChain(db)).toMatchObject({ ok: true, count: 5 });
+    expect(await verifyChainWithAnchors(db, await sink.readAll())).toMatchObject({ ok: false, seq: '5', problem: 'ANCHOR_MISMATCH' });
+  });
+
+  it('edits are still detected (by the chain) when anchors are checked; an intact chain matches every anchor', async () => {
+    await seed(3);
+    const sink = sinkFile();
+    await anchorHead(db, sink, new Date());
+    await seed(2);
+    await anchorHead(db, sink, new Date());
+    expect(await verifyChainWithAnchors(db, await sink.readAll())).toMatchObject({ ok: true, count: 5, anchors: 2 });
+    await asSuperuser("UPDATE audit_log SET actor_id = 'mallory' WHERE seq = 2");
+    expect(await verifyChainWithAnchors(db, await sink.readAll())).toMatchObject({ ok: false, seq: '2', problem: 'HASH_MISMATCH' });
+  });
+
+  it('a malformed anchor file is an error, never skipped', () => {
+    expect(() => parseAnchors('{"seq":"1","hash":"x","anchoredAt":"t"}\n')).toThrow(/line 1/);
+    expect(() => parseAnchors('not json')).toThrow(/line 1/);
+    expect(parseAnchors('')).toEqual([]);
   });
 });
