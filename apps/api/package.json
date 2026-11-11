@@ -10,7 +10,8 @@
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "worker": "tsx src/worker.ts",
-    "wa:sim": "tsx src/wa-sim.ts"
+    "wa:sim": "tsx src/wa-sim.ts",
+    "load": "tsx src/load-test.ts"
   },
   "dependencies": {
     "@chema/channels": "workspace:*",

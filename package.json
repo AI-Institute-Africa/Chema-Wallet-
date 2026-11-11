@@ -11,6 +11,8 @@
     "lint": "eslint . --max-warnings 0",
     "test": "vitest run",
     "secret-scan": "node scripts/secret-scan.mjs",
+    "scope-audit": "node scripts/scope-audit.mjs",
+    "dep-audit": "pnpm audit --prod --audit-level high",
     "verify": "node scripts/ci.mjs",
     "db:migrate": "tsx packages/shared/src/db/cli.ts",
     "dev:api": "pnpm --filter @chema/api dev",

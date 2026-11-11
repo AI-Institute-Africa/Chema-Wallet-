@@ -389,11 +389,11 @@ describe('§O operations', () => {
     expect((await community(w.walletId)).reserved).toBe(30_00n); // still set aside, never lost
     const ops = await t.h.staff('OPS_FINANCE');
     const evidence = await t.upload(w.admin.actor, w.walletId, 'OTHER');
-    const o = await t.payouts.run(ops.actor, t.payouts.payouts.override, { payoutId: id2, externalRef: 'BANK-TT-55102', documentId: evidence });
+    const o = await t.payouts.run(ops.actor, t.payouts.payouts.override, { payoutId: id2, externalRef: 'MANUAL-TT-55102', documentId: evidence });
     await expect(t.h.bus.execute(decideApproval, { approvalId: o.approvalId, decision: 'APPROVED' }, { actor: ops.actor })).rejects.toBeInstanceOf(ForbiddenError);
     const ops2 = await t.h.staff('OPS_FINANCE');
     await t.h.bus.execute(decideApproval, { approvalId: o.approvalId, decision: 'APPROVED' }, { actor: ops2.actor });
-    await t.payouts.run(ops.actor, t.payouts.payouts.override, { payoutId: id2, externalRef: 'BANK-TT-55102', documentId: evidence, approvalId: o.approvalId });
+    await t.payouts.run(ops.actor, t.payouts.payouts.override, { payoutId: id2, externalRef: 'MANUAL-TT-55102', documentId: evidence, approvalId: o.approvalId });
     expect(await status(id2)).toBe('CONFIRMED');
     expect(await community(w.walletId)).toMatchObject({ settled: 30_00n, reserved: 0n, paid: 70_00n });
   });

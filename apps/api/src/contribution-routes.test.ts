@@ -135,7 +135,7 @@ describe('contribute over HTTP (no account)', () => {
     const { slug } = await t.publicWallet();
     expect((await contribute(slug, { amount: { minor: '9999999', ccy: 'USD' } })).json()).toEqual({ error: 'amount_above_maximum' });
     expect((await contribute(slug, { payerPhone: '0773' })).statusCode).toBe(400);
-    expect((await contribute(slug, { rail: 'BANK' })).statusCode).toBe(404);
+    expect((await contribute(slug, { rail: 'BANK' })).statusCode).toBe(404); // scope-audit:allow (proves the rail is absent)
     expect((await contribute(slug, { pin: '1234' })).statusCode).toBe(201); // unknown fields are dropped, never stored
     const { rows } = await t.h.db.query<{ row: string }>('SELECT row_to_json(c)::text AS row FROM contribution c');
     expect(rows.map((r) => r.row).join()).not.toContain('1234');

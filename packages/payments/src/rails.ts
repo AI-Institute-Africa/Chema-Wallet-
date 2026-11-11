@@ -1,6 +1,8 @@
 // Which rails exist and which may collect. A rail collects only when its
 // `rail.<code>` flag is on (D06/D07) and, for a LIVE adapter, when
-// `live_funds.enabled` is on (D01). Disabled rails are absent from every list.
+// `live_funds.enabled` is on (D01) AND the pilot is switched on with both caps
+// agreed (D19: `pilot.enabled`, `pilot.max_wallets`, `pilot.max_amount_minor`;
+// any unset ⇒ no live traffic). Disabled rails are absent from every list.
 //
 // Polling and reconciliation of payments already in flight use the adapter
 // even after its rail is switched off: switching a rail off stops NEW money,
@@ -46,9 +48,21 @@ export class RailRegistry {
     const key = railFlagKey(rail);
     if (!isFlagKey(key)) return undefined;
     if ((await this.flags.getIn(q, key)) !== true) return undefined;
-    // Re-checked on every collection: flipping live funds off stops live rails at once.
-    if (adapter.mode === 'LIVE' && !(await this.flags.getIn(q, 'live_funds.enabled'))) return undefined;
+    // Re-checked on every collection: flipping live funds (or the pilot) off stops live rails at once.
+    if (adapter.mode === 'LIVE' && !(await this.liveAllowed(q))) return undefined;
     return adapter;
+  }
+
+  /** Live money needs the hard gate AND an agreed pilot envelope (D01/D19). */
+  async liveAllowed(q: Queryable): Promise<boolean> {
+    if ((await this.flags.getIn(q, 'live_funds.enabled')) !== true) return false;
+    if ((await this.flags.getIn(q, 'pilot.enabled')) !== true) return false;
+    return (await this.flags.getIn(q, 'pilot.max_wallets')) !== null && (await this.flags.getIn(q, 'pilot.max_amount_minor')) !== null;
+  }
+
+  /** Rails whose adapter moves real money. */
+  liveRails(): string[] {
+    return this.rails().filter((r) => this.adapters.get(r)?.mode === 'LIVE');
   }
 
   async listCollectable(q: Queryable): Promise<string[]> {

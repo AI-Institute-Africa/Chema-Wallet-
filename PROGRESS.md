@@ -13,7 +13,7 @@
 | P07 payouts/governance/closure | done | 2026-11-10 |
 | P08 WhatsApp | done | 2026-11-11 |
 | P09 admin portal + recon + reports | done | 2026-11-11 |
-| P10 hardening + acceptance | todo | |
+| P10 hardening + acceptance | done (mocks; go-live gates NOT-MET) | 2026-11-11 |
 
 ## Decisions
 (append: date — decision — why)
@@ -118,6 +118,13 @@
 - 2026-11-11 — P09: `apps/admin` = Next.js 16 client-side portal on port 3001 (`pnpm dev:admin`): staff login (password + TOTP), nav from `GET /admin/me` (sections derived from the matrix; a hint only, every call re-authorised), generic queue pages `/q/[name]` (verification, claims, approvals, cases, recon, moderation, fraud, holds, support, failures) plus ledger adjustment, config & flags, staff & roles, reports, audit explorer. Token in sessionStorage; no-store/DENY-frame/noindex headers. CI builds it.
 - 2026-11-11 — P09: `pnpm staff:enroll --login … --role …` bootstraps staff from the CLI (needed for the first two Fidelity admins); audited as SYSTEM `bootstrap-cli`. After that, staff are enrolled in the portal.
 
+- 2026-11-11 — P10: API hardening in `apps/api/src/security.ts`: security headers on every response (`default-src 'none'` CSP, nosniff, DENY, no-referrer, HSTS, COOP, Permissions-Policy; `no-store` when a token is present) and an in-process per-client fixed-window rate limit, ON by default (auth/staff/hand-off POST 20/min, public contribution POST 30/min, everything else 600/min; signed webhooks + health exempt; `CHEMA_RATE_*` env overrides; `CHEMA_TRUST_PROXY_HOPS` for the client IP behind a proxy). Tests that need volume pass `rateLimit: false`.
+- 2026-11-11 — P10: `routesOf(app)` (app.ts) exposes every registered route; `security.test.ts` sweeps them all (no-auth 401, stranger 4xx, junk never 5xx, IDOR with another family's real ids, staff-only surface, log PII scan). Adding a route without auth fails the sweep (mutation-checked).
+- 2026-11-11 — P10: a step-up grant dies with its session: `StepUpGrants.consume` requires the grant's `auth_session` to be unrevoked and unexpired (S8). Before, an Actor captured before logout could still spend an unused grant in-process.
+- 2026-11-11 — P10: D19 pilot envelope enforced for LIVE adapters only: collectable needs `live_funds.enabled` AND `pilot.enabled` AND both `pilot.max_wallets` and `pilot.max_amount_minor` set; then each contribution ≤ amount cap and at most N distinct wallets ever take live money (advisory-locked count). Mock/sandbox rails ignore pilot flags.
+- 2026-11-11 — P10: `pnpm scope-audit` (scripts/scope-audit.mjs) and `pnpm dep-audit` (runtime deps, high+) added to `pnpm verify`. Spec/planning docs are exempt from the scope audit; a test proving a rail is absent marks the line `scope-audit:allow`.
+- 2026-11-11 — P10: evidence pack lives in `docs/evidence/` (traceability, flag audit, load test, security + resilience, go-live gates). Gates are NOT-MET unless a human-owned artefact exists; engineering never marks one met.
+
 ## Assumptions (not in spec; safest default taken)
 - Flag precedence: env `CHEMA_FLAG_<KEY>` > `config_flag` row > registry default. Env can enable financial flags (needed for mock rails in dev/test); DB writes cannot.
 - Financial flags (`financial: true` in registry) are refused by `FlagService.set` (`DualApprovalRequiredError`, denial audited) unless a matching APPROVED `config.change` approval is supplied (P01).
@@ -212,7 +219,54 @@
 - P09 runbooks (`runbooks/01..07`) describe the system as built and name open decisions (D05, D09, D11, D16, D18, D20) instead of inventing rules; after-hours = no single-person money decisions.
 - P08 concurrent messages from one number are processed independently; the later commit wins the conversation state. Business effects are still safe (idempotency keys, core re-checks).
 
+- P10 rate limits are per API process (in-memory). One instance is the MVP deployment; before scaling out, move the windows to Redis or every instance grants the full budget. Limits are operational settings (env), not docs/13 flags.
+- P10 pilot wallet cap counts distinct wallets with ANY payment on a LIVE rail (including failed attempts), so a failed first attempt still uses a pilot slot. Stricter is the safe side.
+- P10 load baseline interpretation: 300k contributions/year ≈ 0.01/s average; a plausible burst (100 funerals each taking 30 contributions in the same hour) ≈ 0.8/s. The test drives 32 concurrent initiations; see docs/evidence/load-test.md.
+
+## Open decisions D01–D20 (all OPEN at end of P10; owner → safe default in force)
+| ID | Owner | Safe default in force |
+|---|---|---|
+| D01 legal perimeter | Legal, Compliance | `live_funds.enabled=false`: LIVE adapters cannot register or collect |
+| D02 custody/float/settlement | Finance, Legal | same hard gate; no live settlement accounts |
+| D03 benefit recipient ≠ admin | Claims, Legal, Finance | benefit route BLOCKED on mismatch; written approval + maker-checker to unblock |
+| D04 authority + approval thresholds | Claims, Ops | `approvals.payout_high_value_minor` unset ⇒ every payout dual-approved |
+| D05 death-verification standard/SLA | Claims, Ops | 3 evidence types; `verification.sla_hours` unset ⇒ no SLA promised |
+| D06 MVP rails | Partnerships, Finance | `rail.*` false; mock adapters only |
+| D07 card scope/FX/chargebacks | Finance, Partnerships | `rail.card` false |
+| D08 fee model | Product, Finance | fee schedule empty, `fees.enabled=false` ⇒ no fee, no fee copy |
+| D09 recon tolerance/SLA/emergency release | Finance, Ops | zero tolerance ⇒ exception + TXN hold (never blanket); SLA still code constants |
+| D10 claim auto-approval/arrears | Claims | all claims manual (Fidelity decides) |
+| D11 excess funds/refund policy | Product, Finance, Legal | closure blocked while residual > 0; every refund a manual dual-approved case |
+| D12 retention schedule | DPO, Legal | retain; nothing auto-deleted |
+| D13 privacy roles/cross-border | DPO, Legal | `data.cross_border=false` |
+| D14 Fidelity APIs/owners/SLAs | Fidelity IT, Claims | `fidelity.claims_link=false`; MockFidelity + unconfigured stub (503) |
+| D15 languages/support | Product | English only; sn/nd i18n-ready |
+| D16 WhatsApp/SMS provider | Product, IT, DPO | simulator only; Meta stub refuses to send; `channel.sms=false` |
+| D17 parlours/direct settlement | Ops, Finance | direct settlement OFF; manual payee + name check + dual approval |
+| D18 IPEC/RBZ formats | Compliance | generic CSV marked `GENERIC_CSV_PENDING_D18` |
+| D19 pilot caps/go-no-go/rollback | Exec, Risk, Ops | `pilot.enabled=false`, caps unset ⇒ no live traffic (enforced P10) |
+| D20 after-hours support | Ops | runbook placeholder; no single-person money decisions after hours |
+
+## Known gaps (end of P10)
+- Security: no "sign out everywhere" for a compromised customer (`AuthService.logout` revokes only the caller's session; `it.todo` in acceptance.test). Device/session binding (`auth_session.device_ref`) stored but not enforced. Rate limits are per process. Web/admin CSP still allows inline scripts (needs a nonce middleware). Dev-only advisory `eslint → minimatch <11.0.1` (moderate) open.
+- Audit: chain head is not externally anchored, so truncating the newest rows is undetectable; access-review export has no "reviewed by" sign-off record.
+- Roles (A4): POLICY_BENEFICIARY, CLAIMANT and PAYOUT_RECIPIENT exist as wallet roles but no command grants them; the claimant is not stored on `fidelity_link` (only `created_by` + audit actor). Re-linking an already-linked claim with a different recipient returns ALREADY_LINKED silently (recipient unchanged, so no redirect possible) instead of refusing.
+- Ops: recon SLA still code constants (D09); `verification.sla_hours` has no test.
+- UI: portal screens missing for case detail/assign, payout override, mandate verification, closure checks; no family web screens for claim/funds, payees/payouts/cases/closure; no `/h` hand-off page; neither web app has been clicked through in a browser (`next build` only).
+- Load: only the contribution path was load-tested; payouts, claims and WhatsApp at volume were not. Settlement throughput was measured through the sequential test-harness pump, not the BullMQ worker.
+- Resilience: restore drill is local (compose Postgres); no production-size restore, PITR or replica failover test; RTO/RPO undefined.
+
+## Pilot recommendation (for the D19 owners; nothing here is enabled)
+1. Preconditions: go-live gates 1–9 met (docs/evidence/go-live-gates.md), certified rail adapters, a named recon owner and support rota.
+2. Envelope: `pilot.enabled=true` with small caps, e.g. `pilot.max_wallets` 20–50 and `pilot.max_amount_minor` sized to one typical contribution ceiling; `approvals.payout_high_value_minor` left UNSET (every payout dual-approved); one rail first (EcoCash), `rail.card` off; `fees.enabled` off; `fidelity.claims_link` off until D14 is settled (community-only wallets work without it).
+3. Kill switches, fastest first: `contributions.enabled=false` (stops new money at once), `payouts.enabled=false` (stops new submissions; in-flight polling continues), `pilot.enabled=false` or `live_funds.enabled=false` (live rails disappear from every list on the next request). All are financial flags: the change needs a second Fidelity admin, so name two on-call admins.
+4. Rollback: switching rails off never strands money in flight (poll/recon keep running); refunds stay manual dual-approved cases; ledger corrections only by compensating entries. Run `pnpm audit:verify` and a recon run before and after any rollback.
+5. Monitor daily: recon exceptions by age, PENDING_UNKNOWN payments, DEAD notifications, RAIL_DOWN payouts, the management KPIs (`/admin/reports/management`).
+
 ## Gotchas / handoff to next phase
+- P10 evidence: `docs/evidence/` (traceability, flag-audit, load-test, security-and-resilience, go-live-gates). Load tool: `CHEMA_TEST_DATABASE_URL=… pnpm --filter @chema/api load -- --wallets 40 --contributions 4000 --concurrency 32` (`--keep` leaves the DB for `scripts/restore-drill.sh <db>`). Gap tests for docs/14: `packages/ops/src/acceptance.test.ts`; chaos: `packages/payouts/src/chaos.test.ts`; pilot caps: `packages/payments/src/pilot.test.ts`.
+- New route ⇒ it is in the security sweep automatically. Public-by-design routes must be added to `PUBLIC` in `apps/api/src/security.test.ts`, self-scoped ones to `SELF_SCOPED`.
+- Next migration = 0018 (P10 added none).
 - Admin portal (P09): `OpsService` (`@chema/ops`): `.commands` (`ledgerAdjust`, `reconAssign`, `reconResolve`, `staffEnroll`, `staffSetDisabled`, `staffAssign`, `staffUnassign`, `flagRequest`, `flagApply`, `supportClose`, `decide`), `.queues` (`approvals` with per-row `canDecide`, `claims`, `fraud`, `holds`, `config`, `accessReview` (+CSV), `failures`, `support`, `adjustmentAccounts`), `.reports` (`management`, `finance`, `agent`, `family`, `regulator`), `.audit` (`walletTimeline`, `verifyChain`); `ops.run(actor, cmd, input)`. HTTP: `apps/api/src/admin-routes.ts` (`/admin/*`, staff+MFA only). Tests: `createOpsHarness()` from `@chema/ops/testing` (= WhatsApp harness + `ops`).
 - Next migration = 0018.
 - P10: external anchoring of the audit chain head (truncation of the newest rows is still undetectable); config-driven recon SLA (D09 still code constants); access-review sign-off record (export exists, no "reviewed by" row); portal screens for case detail/assign, payout override form, mandate verification, closure checks (APIs exist; the generic tables call only the actions listed above); a browser run of the portal (`next build` passes; not clicked through).
