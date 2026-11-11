@@ -173,3 +173,16 @@ Abbreviations:
 | Log PII scan | SEC `log PII scan` | PASS |
 | Scope audit | `scripts/scope-audit.test.ts`, `pnpm scope-audit` in `pnpm verify` | PASS |
 | Flag audit + kill switches + live gate | docs/evidence/flag-audit.md; `packages/payments/src/pilot.test.ts`; `packages/payouts/src/killswitch.test.ts`; `packages/core/src/flags/flags.test.ts`; RECON LIVE adapter refused | PASS |
+
+## UI redesign (2026-11-11)
+
+| Item | Evidence | Status |
+|---|---|---|
+| Admin-only, audited target edit | `packages/wallet/src/target.test.ts` (3 tests); `apps/api/src/wallet-routes.test.ts` `PUT /wallets/:id/target…`; `packages/core/src/authz/matrix.test.ts` (EXPECTED row) | PASS |
+| Policy number is opt-in (`showPolicyNumber`, default off) | `packages/contributions/src/policy.test.ts` | PASS |
+| Chips never reach the API payload; no ranking/countdown keys | `packages/contributions/src/contributions.test.ts` `only enabled rails; the page offers no suggested or ranked amounts` (unchanged); `apps/web/src/lib/memorial.test.ts` | PASS (docs/06 "no suggested amounts" overridden for the UI by product decision, see PROGRESS) |
+| Public and owner see the same memorial | `tools/e2e/tests/memorial.spec.ts` `the family admin sees the same memorial page…` | PASS (mocked API) |
+| No card fields; card is a provider redirect | memorial.spec `public memorial page…no card fields` | PASS |
+| Theme toggle persists; pre-paint script carries the nonce | memorial.spec `theme: toggle switches light/dark…` | PASS |
+| Draft preview is private and cannot take contributions | memorial.spec `draft wallet: private preview…` | PASS |
+

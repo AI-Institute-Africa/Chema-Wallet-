@@ -62,6 +62,21 @@ async function initiatePayment(token: string, walletId: string) {
 }
 
 describe('wallet routes', () => {
+
+  it('PUT /wallets/:id/target: the admin changes the target; others are refused; bad bodies are 400', async () => {
+    const admin = await t.h.customer();
+    const walletId = await draftOverHttp(admin.token);
+    const put = (token: string, payload: unknown) => app.inject({ method: 'PUT', url: `/wallets/${walletId}/target`, headers: auth(token), payload: payload as object });
+    let r = await put(admin.token, { targetMinor: '350000' });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ targetMinor: '350000' });
+    r = await put(admin.token, { targetMinor: null });
+    expect(r.json()).toMatchObject({ targetMinor: null });
+    expect((await put(admin.token, { targetMinor: '0' })).statusCode).toBe(400);
+    expect((await put(admin.token, { targetMinor: 12.5 })).statusCode).toBe(400);
+    const stranger = await t.h.customer();
+    expect([403, 404]).toContain((await put(stranger.token, { targetMinor: '100' })).statusCode);
+  });
   it('end to end: draft → evidence → submit → verify → public page, QR, share, report, contributions', async () => {
     const admin = await t.h.customer();
     const walletId = await draftOverHttp(admin.token);

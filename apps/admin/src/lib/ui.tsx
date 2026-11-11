@@ -23,8 +23,14 @@ export const SECTION_LABELS: Record<string, { label: string; href: string }> = {
   agent: { label: 'Agent report', href: '/reports#agent' },
   audit: { label: 'Audit explorer', href: '/audit' },
   support: { label: 'Support hand-offs', href: '/q/support' },
-  failures: { label: 'Failures', href: '/q/failures' },
+  failures: { label: 'Failures', href: '/failures' },
 };
+
+/** Detail screens reachable by id. Shown to everyone: the API decides who may use them. */
+export const EXTRA_LINKS: { label: string; href: string }[] = [
+  { label: 'Mandate changes', href: '/mandate' },
+  { label: 'Closure checks', href: '/closure' },
+];
 
 export function useLoad<T>(path: string | null): { data: T | null; error: string | null; reload: () => void } {
   const [data, setData] = useState<T | null>(null);
@@ -45,13 +51,16 @@ export function useLoad<T>(path: string | null): { data: T | null; error: string
   return { data, error, reload: useCallback(() => setN((x) => x + 1), []) };
 }
 
-export function Shell({ title, children }: { title: string; children: ReactNode }) {
+export function Shell({ title, children, onMe }: { title: string; children: ReactNode; onMe?: (me: Me) => void }) {
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
   useEffect(() => {
     api
       .get<Me>('/admin/me')
-      .then(setMe)
+      .then((m) => {
+        setMe(m);
+        onMe?.(m);
+      })
       .catch(() => router.replace('/login'));
   }, [router]);
   if (!me) return <main className="wide"><p className="muted">Loading…</p></main>;
@@ -64,6 +73,9 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           <li><Link href="/">Home</Link></li>
           {me.sections.map((s) => SECTION_LABELS[s] && (
             <li key={s}><Link href={SECTION_LABELS[s].href}>{SECTION_LABELS[s].label}</Link></li>
+          ))}
+          {EXTRA_LINKS.map((l) => (
+            <li key={l.href}><Link href={l.href}>{l.label}</Link></li>
           ))}
         </ul>
         <button
@@ -121,6 +133,21 @@ export function Table({
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** Key/value list for a detail record (JSON objects shown compactly). */
+export function Fields({ data, keys }: { data: Record<string, unknown>; keys?: string[] }) {
+  const ks = keys ?? Object.keys(data);
+  return (
+    <dl className="fields">
+      {ks.map((k) => (
+        <div key={k}>
+          <dt>{k}</dt>
+          <dd>{cell(data[k])}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 

@@ -1,0 +1,27 @@
+{
+  "slug": "tendai-moyo",
+  "deceasedName": "Sekuru Tendai Moyo",
+  "dateOfDeath": "2026-11-04",
+  "funeralDate": "2026-11-12",
+  "funeralLocation": "Warren Hills, Harare",
+  "badge": { "label": "Verified funeral", "tooltip": "Funeral checks passed. This does not mean insurance cover or claim approval." },
+  "share": {
+    "text": "Family of the late Sekuru Tendai Moyo: please help us give them a dignified send-off.",
+    "url": "http://localhost:3100/w/tendai-moyo",
+    "whatsapp": "https://wa.me/?text=x",
+    "sms": "sms:?body=x",
+    "facebook": "https://www.facebook.com/sharer/sharer.php?u=x",
+    "copy": "http://localhost:3100/w/tendai-moyo"
+  },
+  "photoPath": null,
+  "totals": { "raised": { "minor": "145000", "ccy": "USD" }, "target": { "minor": "200000", "ccy": "USD" } },
+  "closed": false,
+  "usage": null,
+  "tributes": [
+    { "id": "t1", "name": "Chipo & Family", "amount": { "minor": "5000", "ccy": "USD" }, "message": "Zororai murugare Sekuru Moyo. You will be dearly missed by all of us in Bulawayo.", "at": "2026-11-11T09:45:00.000Z" },
+    { "id": "t2", "name": "Farai Katsande", "amount": { "minor": "3000", "ccy": "USD" }, "message": "My deepest condolences to the entire family during this difficult time.", "at": "2026-11-11T09:00:00.000Z" },
+    { "id": "t3", "name": "Sympathetic Friend", "amount": null, "message": "Praying for strength and comfort for the bereaved family.", "at": "2026-11-11T07:00:00.000Z" }
+  ],
+  "contribute": { "currency": "USD", "rails": ["CARD", "ECOCASH", "ONEMONEY"], "min": { "minor": "100", "ccy": "USD" }, "max": { "minor": "1000000", "ccy": "USD" }, "groupsEnabled": false },
+  "policy": { "insurer": "Fidelity Life Assurance", "number": "FLA-2024-9841" }
+}

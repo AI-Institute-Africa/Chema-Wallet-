@@ -129,6 +129,17 @@ export function registerWalletRoutes(app: FastifyInstance, core: CoreServices, w
     return reply.header('cache-control', 'no-store').send(view);
   });
 
+  // UI redesign: the family admin changes (or clears) the fundraising target. Audited; no money moves.
+  app.put('/wallets/:id/target', { preHandler: requireActor }, async (req, reply) => {
+    const b = parse(z.object({ targetMinor: z.string().regex(/^[1-9]\d{0,14}$/).nullable() }).strict(), req.body);
+    const view = await core.bus.execute(
+      w.updateTarget,
+      { walletId: idParam(req), targetMinor: b.targetMinor === null ? null : BigInt(b.targetMinor) },
+      { actor: actorOf(req) },
+    );
+    return reply.header('cache-control', 'no-store').send(view);
+  });
+
   // People on the wallet (admin / approver): ids to nominate a claim recipient or bind a payee.
   app.get('/wallets/:id/people', { preHandler: requireActor }, async (req, reply) => {
     const people = await core.bus.execute(w.people, { walletId: idParam(req) }, { actor: actorOf(req) });

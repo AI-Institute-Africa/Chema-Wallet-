@@ -2,6 +2,7 @@
 // Browser-side wiring: API base URL + the session token (sessionStorage, so it
 // dies with the tab). The token is never put in a URL.
 import { createApiClient } from './api';
+import { createFamilyClient } from './family';
 
 const KEY = 'chema.session';
 
@@ -23,6 +24,11 @@ export function setToken(token: string | null): void {
 }
 
 export const api = createApiClient({
+  baseUrl: process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:7600',
+  token: getToken,
+});
+
+export const family = createFamilyClient({
   baseUrl: process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:7600',
   token: getToken,
 });

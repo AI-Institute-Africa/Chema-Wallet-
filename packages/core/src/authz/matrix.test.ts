@@ -156,6 +156,7 @@ const EXPECTED: Record<Action, Persona[]> = {
   'tribute.manage_own': [...CUSTOMERS, 'public'],
   'tribute.moderate': ['verifier', 'fidelity_admin'],
   'wallet.privacy.update': ['admin'],
+  'wallet.update_target': ['admin'],
   'wallet.photo.set': ['admin'],
   'group.create': CUSTOMERS,
   'notification.process': ['system'],
