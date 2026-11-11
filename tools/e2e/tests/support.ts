@@ -5,8 +5,8 @@
 import { expect, type Page, type Request, type Response } from '@playwright/test';
 
 export const API = 'http://localhost:7600';
-export const WEB = 'http://localhost:3000';
-export const ADMIN = 'http://localhost:3001';
+export const WEB = 'http://localhost:3100';
+export const ADMIN = 'http://localhost:3101';
 
 export type Handler = (req: Request, body: unknown) => { status?: number; json?: unknown } | unknown;
 

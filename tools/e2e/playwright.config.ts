@@ -2,6 +2,8 @@
 // MOCKED in the browser (page.route on the API origin): no Postgres, Redis or
 // API process needed. Build both apps first (`pnpm --filter @chema/web build`,
 // `pnpm --filter @chema/admin build`), then `pnpm --filter @chema/e2e test`.
+// Ports 3100/3101 (3000/3001 are left for a manual stack). The API origin the
+// builds call (default :7600) is intercepted in the browser and never reached.
 import { defineConfig } from '@playwright/test';
 
 const root = new URL('../..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
@@ -13,7 +15,7 @@ export default defineConfig({
   reporter: [['list']],
   use: { browserName: 'chromium', headless: true, trace: 'off' },
   webServer: [
-    { command: 'pnpm --filter @chema/web start', cwd: root, url: 'http://localhost:3000/h', reuseExistingServer: false, timeout: 60_000 },
-    { command: 'pnpm --filter @chema/admin start', cwd: root, url: 'http://localhost:3001/login', reuseExistingServer: false, timeout: 60_000 },
+    { command: 'pnpm --filter @chema/web exec next start -p 3100', cwd: root, url: 'http://localhost:3100/h', reuseExistingServer: false, timeout: 60_000 },
+    { command: 'pnpm --filter @chema/admin exec next start -p 3101', cwd: root, url: 'http://localhost:3101/login', reuseExistingServer: false, timeout: 60_000 },
   ],
 });
