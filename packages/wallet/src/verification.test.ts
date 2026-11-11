@@ -489,6 +489,26 @@ describe('lifecycle', () => {
     const all = await t.h.bus.execute(t.w.queue, {}, { actor: fa.actor });
     expect(all.find((q) => q.caseId === caseId)?.assignedVerifiers).toEqual([verifier.personId]);
   });
+
+  it('verification.sla_hours: unset ⇒ no due-by promised; set ⇒ due-by in the family view + queue, overdue once past', async () => {
+    const ADMIN = { id: 'staff-sla', role: 'FIDELITY_ADMIN', channel: 'ADMIN' };
+    const { admin, walletId, caseId, verifier } = await submitted();
+    expect((await view(walletId, admin.actor)).latestCase).toMatchObject({ id: caseId, dueBy: null });
+    expect((await t.h.bus.execute(t.w.queue, {}, { actor: verifier.actor }))[0]).toMatchObject({ caseId, dueBy: null, overdue: false });
+    await t.h.flags.set('verification.sla_hours', 48, ADMIN, 'D05 agreed: decide within 48 hours');
+    try {
+      const v = (await view(walletId, admin.actor)).latestCase!;
+      expect(Date.parse(v.dueBy!) - Date.parse(v.submittedAt)).toBe(48 * 3_600_000);
+      expect((await t.h.bus.execute(t.w.queue, {}, { actor: verifier.actor }))[0]).toMatchObject({ caseId, dueBy: v.dueBy, overdue: false });
+      t.h.advance(49 * 3_600_000);
+      expect((await t.h.bus.execute(t.w.queue, {}, { actor: verifier.actor }))[0]).toMatchObject({ caseId, overdue: true });
+      // A decided case promises nothing any more.
+      await t.h.bus.execute(t.w.decide, { caseId, outcome: 'APPROVED', reasonCode: 'EVIDENCE_SUFFICIENT', checklist: ALL_PASS }, { actor: verifier.actor });
+      expect((await view(walletId, admin.actor)).latestCase).toMatchObject({ id: caseId, dueBy: null });
+    } finally {
+      await t.h.flags.set('verification.sla_hours', null, ADMIN, 'restore unset after the test');
+    }
+  });
 });
 
 describe('fraud rules (review tasks only)', () => {

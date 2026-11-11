@@ -15,7 +15,7 @@ import {
   type CommandTx,
 } from '@chema/core';
 import { listWalletAccounts, placeHold, releaseHold, type HoldInput } from '@chema/ledger';
-import { SLA_HOURS } from '@chema/payments';
+import { caseSlaHours, exceptionSlaHours } from '@chema/payments';
 import { money, parseMinor, type Currency, type Queryable } from '@chema/shared';
 import { loadWallet } from '@chema/wallet';
 import { emit, isUuid, loadPayout, writeCaseEvent, type PayoutDeps } from './store';
@@ -283,7 +283,7 @@ export function governanceCommands(deps: PayoutDeps) {
         await tx.query('UPDATE case_record SET evidence_docs = evidence_docs || $2::uuid[], updated_at = now() WHERE id = $1', [c.id, input.evidenceDocs]);
         await writeCaseEvent(tx, ctx.actor, c.id, 'EVIDENCE', { refId: input.evidenceDocs.join(','), now });
       }
-      if (input.escalate) await escalateCase(tx, ctx.actor, c, 'MANUAL', now);
+      if (input.escalate) await escalateCase(tx, ctx.actor, c, 'MANUAL', now, (await caseSlaHours(tx, deps.flags))[c.case_type as keyof Awaited<ReturnType<typeof caseSlaHours>>] ?? 168);
       return { result: await caseView(tx, await loadCase(tx, c.id)) };
     },
   };
@@ -430,19 +430,37 @@ export function governanceCommands(deps: PayoutDeps) {
     },
     async run(tx, _input, ctx) {
       const now = deps.clock();
+      // D09 thresholds from config (unset => built-in hours). Cases not yet escalated are re-based on
+      // the configured SLA; recon exceptions (whose stored SLA moves only with an escalation) age by
+      // opened_at + configured hours until their first escalation, then by the stored window.
+      const caseHours = await caseSlaHours(tx, deps.flags);
+      const exHours = await exceptionSlaHours(tx, deps.flags);
+      for (const [type, hours] of Object.entries(caseHours)) {
+        await tx.query(
+          `UPDATE case_record SET sla_due_at = opened_at + make_interval(hours => $2::int), updated_at = now()
+            WHERE closed_at IS NULL AND escalation_level = 0 AND case_type = $1
+              AND sla_due_at IS DISTINCT FROM opened_at + make_interval(hours => $2::int)`,
+          [type, hours],
+        );
+      }
       const { rows: cases } = await tx.query<CaseRow>(
         `SELECT ${CASE_COLS} FROM case_record WHERE closed_at IS NULL AND sla_due_at <= $1 ORDER BY sla_due_at FOR UPDATE`,
         [now.toISOString()],
       );
-      for (const c of cases) await escalateCase(tx, ctx.actor, c, 'SLA_BREACHED', now);
+      for (const c of cases) await escalateCase(tx, ctx.actor, c, 'SLA_BREACHED', now, caseHours[c.case_type as keyof typeof caseHours] ?? 168);
       const { rows: ex } = await tx.query<{ id: string; severity: Severity }>(
-        `SELECT id, severity FROM recon_exception WHERE resolved_at IS NULL AND sla_due_at <= $1 ORDER BY sla_due_at FOR UPDATE`,
-        [now.toISOString()],
+        `SELECT id, severity FROM recon_exception
+          WHERE resolved_at IS NULL
+            AND CASE WHEN escalation_level = 0
+                     THEN opened_at + make_interval(hours => CASE severity WHEN 'HIGH' THEN $2::int WHEN 'MEDIUM' THEN $3::int ELSE $4::int END)
+                     ELSE sla_due_at END <= $1::timestamptz
+          ORDER BY sla_due_at FOR UPDATE`,
+        [now.toISOString(), exHours.HIGH, exHours.MEDIUM, exHours.LOW],
       );
       for (const e of ex) {
         await tx.query(
           `UPDATE recon_exception SET escalation_level = escalation_level + 1, sla_due_at = $2, updated_at = now() WHERE id = $1`,
-          [e.id, new Date(now.getTime() + SLA_HOURS[e.severity] * 3_600_000).toISOString()],
+          [e.id, new Date(now.getTime() + exHours[e.severity] * 3_600_000).toISOString()],
         );
       }
       const { rows: holds } = await tx.query<{ n: number }>(
@@ -459,12 +477,12 @@ export function governanceCommands(deps: PayoutDeps) {
   return { open, assign, update, resolve, view, listForWallet, queue, holdPlace, holdRelease, sweep };
 }
 
-async function escalateCase(tx: CommandTx, actor: Actor, c: CaseRow, reason: string, now: Date): Promise<void> {
+async function escalateCase(tx: CommandTx, actor: Actor, c: CaseRow, reason: string, now: Date, slaHours: number): Promise<void> {
   await tx.query(
     `UPDATE case_record SET status = 'ESCALATED', escalation_level = escalation_level + 1,
-            sla_due_at = $2::timestamptz + make_interval(hours => case_sla_hours(case_type)), updated_at = now()
+            sla_due_at = $2::timestamptz + make_interval(hours => $3::int), updated_at = now()
       WHERE id = $1`,
-    [c.id, now.toISOString()],
+    [c.id, now.toISOString(), slaHours],
   );
   await writeCaseEvent(tx, actor, c.id, 'ESCALATED', { reasonCode: reason, now });
 }

@@ -75,6 +75,17 @@ describe('claim routes', () => {
     expect(r.statusCode).toBe(403);
   });
 
+  it('re-linking with a different recipient ⇒ 409 recipient_change_refused; the same recipient ⇒ 202 (idempotent)', async () => {
+    const c = await t.linkedCase();
+    const url = `/wallets/${c.walletId}/claim`;
+    const other = await app.inject({ method: 'POST', url, headers: auth(c.admin.token), payload: { recipientPersonId: c.admin.personId, recipientIdNumber: '63-000000B42' } });
+    expect(other.statusCode).toBe(409);
+    expect(other.json()).toEqual({ error: 'recipient_change_refused' });
+    const same = await app.inject({ method: 'POST', url, headers: auth(c.admin.token), payload: { recipientPersonId: c.admin.personId, recipientIdNumber: c.recipientId } });
+    expect(same.statusCode).toBe(202);
+    expect(same.json()).toMatchObject({ linked: true });
+  });
+
   it('flag off ⇒ claim routes 404', async () => {
     const off = await createFidelityHarness({ 'fidelity.claims_link': 'false' });
     const offApp = buildApp({ db: off.h.db, core: off.h, claims: off.claims });

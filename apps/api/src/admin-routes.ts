@@ -15,6 +15,7 @@ import {
 import type { OpsService } from '@chema/ops';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { deviceOf } from './session';
 
 const Uuid = z.uuid();
 const Note = z.string().min(10).max(1000);
@@ -45,6 +46,7 @@ export const PORTAL_SECTIONS: ReadonlyArray<{ id: string; action: Action }> = [
   { id: 'moderation', action: 'tribute.moderate' },
   { id: 'fraud', action: 'fraud_flag.queue' },
   { id: 'holds', action: 'hold.register' },
+  { id: 'mandates', action: 'mandate.queue' },
   { id: 'config', action: 'config.view' },
   { id: 'staff', action: 'role.review' },
   { id: 'ledger', action: 'ledger.adjust' },
@@ -65,7 +67,7 @@ export function registerAdminRoutes(app: FastifyInstance, core: CoreServices, op
   async function requireStaff(req: FastifyRequest, reply: FastifyReply): Promise<void> {
     const h = req.headers.authorization;
     const token = h?.startsWith('Bearer ') ? h.slice(7).trim() : undefined;
-    const actor = token ? await core.auth.authenticate(token) : null;
+    const actor = token ? await core.auth.authenticate(token, { device: deviceOf(req) }) : null;
     if (!actor) {
       await reply.code(401).send({ error: 'unauthenticated' });
       return;
@@ -99,6 +101,7 @@ export function registerAdminRoutes(app: FastifyInstance, core: CoreServices, op
     if (!q) return reply;
     return json(await ops.run(actorOf(req), Q.holds, { includeReleased: q.all === '1' }));
   });
+  app.get('/admin/queues/mandate-changes', pre, async (req) => json(await ops.run(actorOf(req), Q.mandateChanges, {})));
   app.get('/admin/queues/config', pre, async (req) => json(await ops.run(actorOf(req), Q.config, {})));
   app.get('/admin/queues/failures', pre, async (req) => json(await ops.run(actorOf(req), Q.failures, {})));
   app.get('/admin/queues/support', pre, async (req, reply) => {
@@ -112,6 +115,33 @@ export function registerAdminRoutes(app: FastifyInstance, core: CoreServices, op
     const r = await ops.run(actorOf(req), Q.accessReview, {});
     if (q.format === 'csv') return reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', 'attachment; filename="access-review.csv"').send(r.csv);
     return json(r.rows);
+  });
+
+  // The same export with what a sign-off attests to (sha256 + row count of the CSV) and past sign-offs.
+  app.get('/admin/access-review', pre, async (req) => json(await ops.run(actorOf(req), Q.accessReview, {})));
+  // Sign-off of the export above: the reviewer attests to its row count + sha256.
+  app.post('/admin/access-review/signoffs', pre, async (req, reply) => {
+    const b = parse(
+      z.object({
+        periodFrom: z.iso.datetime(),
+        periodTo: z.iso.datetime(),
+        rowCount: z.number().int().nonnegative(),
+        csvSha256: z.string().regex(/^[0-9a-f]{64}$/),
+        notes: z.string().min(10).max(2000),
+      }).strict().refine((p) => Date.parse(p.periodFrom) < Date.parse(p.periodTo)),
+      req.body,
+      reply,
+    );
+    if (!b) return reply;
+    return reply.code(201).send(json(await ops.run(actorOf(req), ops.commands.accessReviewSignoff, b)));
+  });
+
+  // Suspected compromise: end every customer session of one person (MFA, written reason).
+  app.post('/admin/people/:id/sessions/revoke', pre, async (req, reply) => {
+    const id = idOf(req, reply);
+    const b = parse(z.object({ reason: Note }).strict(), req.body, reply);
+    if (!id || !b) return reply;
+    return json(await ops.run(actorOf(req), ops.commands.revokePersonSessions, { personId: id, reason: b.reason }));
   });
 
   // ── Ledger adjustment (maker-checker) ────────────────────────────────────

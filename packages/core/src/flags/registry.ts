@@ -112,6 +112,43 @@ function reconTolerances() {
   return out as Record<`recon.tolerance.${(typeof RAILS)[number]}.${(typeof CCYS)[number]}`, FlagDef<bigint | null>>;
 }
 
+// D09 ageing thresholds. Unset => the built-in hours (the values the system
+// shipped with; shorter = earlier escalation, the safe side for ageing).
+export const EXCEPTION_SLA_DEFAULT_HOURS = { high: 24, medium: 72, low: 168 } as const;
+export const CASE_SLA_DEFAULT_HOURS = {
+  chargeback: 168,
+  refund: 120,
+  recon: 72,
+  fraud: 24,
+  beneficiary_mismatch: 168,
+  authority_dispute: 72,
+  payment_dispute: 72,
+  provider_dispute: 168,
+} as const;
+
+function slaFlags() {
+  const out: Record<string, FlagDef<number | null>> = {};
+  for (const [sev, h] of Object.entries(EXCEPTION_SLA_DEFAULT_HOURS)) {
+    out[`recon.exception_sla_hours.${sev}`] = int({
+      description: `Recon exception SLA (hours) for ${sev.toUpperCase()} severity before escalation; unset ⇒ ${h} h (built-in). Values below 1 count as 1.`,
+      decision: 'D09',
+      financial: false,
+    });
+  }
+  for (const [type, h] of Object.entries(CASE_SLA_DEFAULT_HOURS)) {
+    out[`case.sla_hours.${type}`] = int({
+      description: `Case SLA (hours) for ${type.toUpperCase()} cases before escalation; unset ⇒ ${h} h (built-in). Values below 1 count as 1.`,
+      decision: 'D09',
+      financial: false,
+    });
+  }
+  return out as Record<
+    | `recon.exception_sla_hours.${keyof typeof EXCEPTION_SLA_DEFAULT_HOURS}`
+    | `case.sla_hours.${keyof typeof CASE_SLA_DEFAULT_HOURS}`,
+    FlagDef<number | null>
+  >;
+}
+
 export const FLAGS = {
   // ── Global kill switches ──────────────────────────────────────────────
   'live_funds.enabled': bool({ description: 'Hard gate: real money. Off ⇒ sandbox/mock adapters only.', decision: 'D01/D02', financial: true }),
@@ -164,8 +201,15 @@ export const FLAGS = {
   // default is the stricter built-in limit (3 drafts per creator per 24 h).
   'fraud.velocity_max_drafts_24h': int({ description: 'Drafts per creator per 24 h before a velocity review flag; unset ⇒ 3.', financial: false }),
 
+  // ── Security ──────────────────────────────────────────────────────────
+  // Staff sessions are always bound to the device they logged in from. For
+  // customers binding is opt-in: phones change networks/browsers and a
+  // mis-bound session would lock a grieving family out mid-payout.
+  'security.bind_customer_device': bool({ description: 'Refuse a customer session used from a device other than the one it logged in on; off ⇒ only staff sessions are device-bound.', financial: false }),
+
   // ── Recon (D09) ───────────────────────────────────────────────────────
   ...reconTolerances(),
+  ...slaFlags(),
 
   // ── Closure / refunds (D11) ───────────────────────────────────────────
   'closure.excess_funds_policy': text({ description: 'Residual-funds policy; unset ⇒ closure blocked if residual > 0.', decision: 'D11', financial: true }),

@@ -3,6 +3,7 @@
 import { decideApproval, requestFlagChange, type Actor, type Command, type CoreServices } from '@chema/core';
 import { walletTimeline, verifyAuditChain } from './audit-explorer';
 import {
+  accessReviewSignoff,
   flagApply,
   ledgerAdjust,
   reconAssign,
@@ -23,11 +24,12 @@ import {
   failures,
   fraudQueue,
   holdRegister,
+  mandateQueue,
   supportQueue,
 } from './queues';
 import { agentReport, familyReport, financeReport, managementReport, regulatorExport } from './reports';
 
-export type OpsCore = Pick<CoreServices, 'bus' | 'flags' | 'staffAuth' | 'authorizer'>;
+export type OpsCore = Pick<CoreServices, 'bus' | 'flags' | 'staffAuth' | 'authorizer' | 'sessions'>;
 
 export class OpsService {
   readonly commands;
@@ -52,6 +54,8 @@ export class OpsService {
       flagApply: flagApply(deps),
       supportClose: supportClose(deps),
       decide: decideApproval,
+      accessReviewSignoff: accessReviewSignoff(deps),
+      revokePersonSessions: core.sessions.revokePersonSessions,
     };
     const qd = { flags: core.flags, authorizer: core.authorizer, clock };
     this.queues = {
@@ -64,6 +68,7 @@ export class OpsService {
       failures,
       support: supportQueue,
       adjustmentAccounts,
+      mandateChanges: mandateQueue,
     };
     this.reports = {
       management: managementReport(clock),

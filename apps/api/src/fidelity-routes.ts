@@ -6,6 +6,7 @@ import { AuthenticationError, type Actor, type CoreServices } from '@chema/core'
 import type { ClaimsService } from '@chema/fidelity';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { deviceOf } from './session';
 
 const Uuid = z.uuid();
 const Ident = z.string().min(1).max(64);
@@ -27,7 +28,7 @@ export function registerFidelityRoutes(app: FastifyInstance, core: CoreServices,
   async function requireActor(req: FastifyRequest, reply: FastifyReply): Promise<void> {
     const h = req.headers.authorization;
     const token = h?.startsWith('Bearer ') ? h.slice(7).trim() : undefined;
-    const actor = token ? await core.auth.authenticate(token) : null;
+    const actor = token ? await core.auth.authenticate(token, { device: deviceOf(req) }) : null;
     if (!actor) {
       await reply.code(401).send({ error: 'unauthenticated' });
       return;
@@ -50,9 +51,10 @@ export function registerFidelityRoutes(app: FastifyInstance, core: CoreServices,
 
   app.post('/wallets/:id/claim', { preHandler: requireActor }, async (req, reply) => {
     const id = walletId(req, reply);
-    const b = parse(z.object({ recipientPersonId: Uuid, recipientIdNumber: z.string().min(4).max(40) }).strict(), req.body, reply);
+    const b = parse(z.object({ recipientPersonId: Uuid, recipientIdNumber: z.string().min(4).max(40), claimantPersonId: Uuid.optional() }).strict(), req.body, reply);
     if (!id || !b) return reply;
-    return reply.code(202).send(json(await claims.linkClaim(actorOf(req), { walletId: id, ...b })));
+    const { claimantPersonId, ...rest } = b;
+    return reply.code(202).send(json(await claims.linkClaim(actorOf(req), { walletId: id, ...rest, ...(claimantPersonId ? { claimantPersonId } : {}) })));
   });
 
   app.post('/wallets/:id/claim/evidence', { preHandler: requireActor }, async (req, reply) => {

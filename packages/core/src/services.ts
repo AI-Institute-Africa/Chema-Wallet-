@@ -7,6 +7,7 @@ import { documentCommands } from './documents/service';
 import type { BlobStore, MalwareScanner } from './documents/store';
 import { FlagService } from './flags/service';
 import { AuthService } from './identity/auth';
+import { sessionCommands } from './identity/commands';
 import type { OtpProvider } from './identity/otp';
 import { StepUpGrants, type Clock } from './identity/sessions';
 import { StaffAuthService } from './identity/staff';
@@ -28,10 +29,18 @@ export function createCoreServices(deps: CoreDeps) {
   const flags = new FlagService(deps.db, audit, deps.env ?? process.env);
   const authorizer = new Authorizer({ payoutHighValueMinor: (q) => flags.getIn(q, 'approvals.payout_high_value_minor') });
   const bus = new CommandBus(deps.db, authorizer, audit, new StepUpGrants(clock), clock);
-  const auth = new AuthService({ db: deps.db, otp: deps.otp, secrets: deps.secrets, audit, clock });
+  const auth = new AuthService({
+    db: deps.db,
+    otp: deps.otp,
+    secrets: deps.secrets,
+    audit,
+    clock,
+    bindCustomerDevice: () => flags.get('security.bind_customer_device'),
+  });
   const staffAuth = new StaffAuthService({ db: deps.db, secrets: deps.secrets, audit, clock });
   const documents = documentCommands({ blobs: deps.blobs, scanner: deps.scanner, secrets: deps.secrets });
-  return { db: deps.db, audit, flags, authorizer, bus, auth, staffAuth, documents };
+  const sessions = sessionCommands(clock);
+  return { db: deps.db, audit, flags, authorizer, bus, auth, staffAuth, documents, sessions };
 }
 
 export type CoreServices = ReturnType<typeof createCoreServices>;

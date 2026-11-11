@@ -15,6 +15,7 @@ import {
   LockedFlagError,
   NotFoundError,
   randomToken,
+  RefusedError,
   STAFF_ROLES,
   ValidationError,
   type Command,
@@ -25,6 +26,7 @@ import {
 } from '@chema/core';
 import { getAccounts, post, validateBenefitRules, validateJournal, type EntryInput } from '@chema/ledger';
 import { money, type Currency, type Queryable } from '@chema/shared';
+import { accessReviewExport } from './queues';
 import { isUuid, note, requireUuid, walletExists } from './util';
 
 export interface OpsDeps {
@@ -399,6 +401,81 @@ export function supportClose(deps: OpsDeps): Command<{ escalationId: string; not
       );
       if (rows.length !== 1) throw new ConflictError('ALREADY_CLOSED');
       return { result: { escalationId: input.escalationId }, audit: { reasonCode: 'CLOSED' } };
+    },
+  };
+}
+
+// ── Access review sign-off (docs/12 queue 10) ────────────────────────────────
+
+export interface AccessReviewSignoffInput {
+  /** The review period (ISO date-times), from < to ≤ now. */
+  periodFrom: string;
+  periodTo: string;
+  /** What the reviewer saw: the export's row count and the sha256 of its CSV. */
+  rowCount: number;
+  csvSha256: string;
+  notes: string;
+}
+
+/** Audit actions that change staff access (enrolment, disable/enable, case assignment). */
+const ACCESS_CHANGE_ACTIONS = ['staff.enroll', 'staff.set_disabled', 'staff.assign', 'staff.unassign'];
+
+/**
+ * Record who reviewed the access-review export, for which period, and exactly
+ * which export (row count + sha256 of the CSV, re-computed here: a stale or
+ * altered export is refused, audited, 409). Reviewer = AUDITOR or
+ * FIDELITY_ADMIN (matrix), and never someone who changed staff access or
+ * checked a privileged-access approval during the reviewed period (no
+ * self-certification; audited denial REVIEWER_CHANGED_ACCESS).
+ */
+export function accessReviewSignoff(deps: OpsDeps): Command<AccessReviewSignoffInput, { signoffId: string }> {
+  const period = (input: AccessReviewSignoffInput) => {
+    const from = typeof input.periodFrom === 'string' ? Date.parse(input.periodFrom) : Number.NaN;
+    const to = typeof input.periodTo === 'string' ? Date.parse(input.periodTo) : Number.NaN;
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) throw new ValidationError('invalid period');
+    return { from: new Date(from), to: new Date(to) };
+  };
+  return {
+    name: 'role.review.signoff',
+    async resolve(_q, input) {
+      period(input);
+      if (!Number.isInteger(input.rowCount) || input.rowCount < 0) throw new ValidationError('invalid row count');
+      if (typeof input.csvSha256 !== 'string' || !/^[0-9a-f]{64}$/.test(input.csvSha256)) throw new ValidationError('invalid sha256');
+      return { action: 'role.review.signoff', subject: { type: 'access_review', id: 'signoff' } };
+    },
+    async guard(q, input, actor) {
+      const { from, to } = period(input);
+      const { rows } = await q.query(
+        `SELECT 1 FROM audit_log a
+          WHERE a.actor_id = $1 AND a.authz_result = 'ALLOWED' AND a.ts >= $2::timestamptz AND a.ts <= $3::timestamptz
+            AND (a.action = ANY($4::text[])
+                 OR (a.action = 'approval.decide' AND EXISTS (
+                       SELECT 1 FROM approval p WHERE p.id::text = a.subject_id AND p.action = 'role.admin')))
+          LIMIT 1`,
+        [actor.personId, from.toISOString(), to.toISOString(), ACCESS_CHANGE_ACTIONS],
+      );
+      return rows.length > 0 ? 'REVIEWER_CHANGED_ACCESS' : null;
+    },
+    async run(tx, input, ctx) {
+      const { from, to } = period(input);
+      const now = deps.clock();
+      if (to.getTime() > now.getTime()) throw new ValidationError('period ends in the future');
+      const notes = typeof input.notes === 'string' ? input.notes.trim() : '';
+      if (notes.length < 10 || notes.length > 2000) throw new ConflictError('REASON_REQUIRED');
+      const current = await accessReviewExport(tx);
+      if (current.rowCount !== input.rowCount || current.csvSha256 !== input.csvSha256) throw new RefusedError('EXPORT_CHANGED');
+      const role = ctx.actor.staffRole;
+      if (role !== 'AUDITOR' && role !== 'FIDELITY_ADMIN') throw new ConflictError('REVIEWER_ROLE');
+      const { rows } = await tx.query<{ id: string }>(
+        `INSERT INTO access_review_signoff (reviewer_person, reviewer_role, period_from, period_to, row_count, csv_sha256, notes, reviewed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+        [ctx.actor.personId, role, from.toISOString(), to.toISOString(), input.rowCount, input.csvSha256, notes, now.toISOString()],
+      );
+      const signoffId = rows[0]?.id ?? '';
+      return {
+        result: { signoffId },
+        audit: { subjectId: signoffId, reasonCode: 'ACCESS_REVIEW_SIGNED', after: { periodFrom: from.toISOString(), periodTo: to.toISOString(), rowCount: input.rowCount, csvSha256: input.csvSha256 } },
+      };
     },
   };
 }

@@ -23,6 +23,7 @@ import { WebhookRejectedError } from '@chema/providers';
 import { FidelityNotConfiguredError, FidelityUnavailableError } from '@chema/fidelity';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { deviceOf } from './session';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -31,13 +32,6 @@ declare module 'fastify' {
 }
 
 const Uuid = z.uuid();
-const SAFE_DEVICE = /^[A-Za-z0-9._:-]{1,64}$/;
-
-function deviceOf(req: FastifyRequest): string | undefined {
-  const h = req.headers['x-device-id'];
-  const v = Array.isArray(h) ? h[0] : h;
-  return v && SAFE_DEVICE.test(v) ? v : undefined;
-}
 
 function meta(req: FastifyRequest) {
   const device = deviceOf(req);
@@ -92,7 +86,7 @@ export function registerRoutes(app: FastifyInstance, core: CoreServices): void {
   async function requireActor(req: FastifyRequest, reply: FastifyReply): Promise<void> {
     const h = req.headers.authorization;
     const token = h?.startsWith('Bearer ') ? h.slice(7).trim() : undefined;
-    const actor = token ? await core.auth.authenticate(token) : null;
+    const actor = token ? await core.auth.authenticate(token, { device: deviceOf(req) }) : null;
     if (!actor) {
       await reply.code(401).send({ error: 'unauthenticated' });
       return;
@@ -126,7 +120,18 @@ export function registerRoutes(app: FastifyInstance, core: CoreServices): void {
     return reply.code(204).send();
   });
 
-  app.post('/auth/step-up/start', { preHandler: requireActor }, async (req, reply) => {
+  // Who am I: the caller's own ids (no lookup of anyone else; nothing changes, so no audit row).
+  app.get('/me', { preHandler: requireActor }, async (req) => {
+    const a = actorOf(req);
+    return { personId: a.personId, kind: a.kind, channel: a.channel, ...(a.staffRole ? { staffRole: a.staffRole } : {}) };
+  });
+
+  // Sign out everywhere: every customer session of the caller, this one included.
+  app.post('/auth/sessions/revoke-all', { preHandler: requireActor }, async (req) => {
+    return core.bus.execute(core.sessions.signOutEverywhere, {}, { actor: actorOf(req) });
+  });
+
+  app.post('/auth/step-up/start',{ preHandler: requireActor }, async (req, reply) => {
     const target = parse(StepUpTargetBody, req.body);
     return reply.code(202).send(await core.auth.startStepUp(actorOf(req), target));
   });

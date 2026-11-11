@@ -149,6 +149,13 @@ export const ACTIONS = [
   'report.regulator',
   'audit.explore',
   'audit.verify',
+  // Gaps after P10: sign out everywhere, access-review sign-off.
+  'session.revoke_own',
+  'session.revoke_all',
+  'role.review.signoff',
+  // UI gaps: mandate-change verifier queue, the family's people list.
+  'mandate.queue',
+  'wallet.people.view',
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -232,7 +239,8 @@ export const MATRIX: Readonly<Record<Action, Cells>> = {
   'consent.manage': { contributor: 'own' },
   'consent.view': { contributor: 'own', auditor: 'allow', fidelity_admin: 'allow' },
   // Sensitive documents: uploader, the wallet admin, assigned case staff, audit.
-  'document.upload': { contributor: 'own_unlinked', admin: 'allow', agent: 'assigned' },
+  // ops/finance: OVERRIDE_EVIDENCE only, to a wallet with a payout on a down rail (command guard).
+  'document.upload': { contributor: 'own_unlinked', admin: 'allow', agent: 'assigned', opsfin: 'allow' },
   'document.read': {
     contributor: 'own',
     admin: 'allow',
@@ -370,6 +378,18 @@ export const MATRIX: Readonly<Record<Action, Cells>> = {
   'report.regulator': { auditor: 'allow', fidelity_admin: 'allow' },
   'audit.explore': { opsfin: 'allow', auditor: 'allow', fidelity_admin: 'allow' },
   'audit.verify': { auditor: 'allow', fidelity_admin: 'allow' },
+  // Sign out everywhere: a customer ends their own sessions; a Fidelity admin
+  // (MFA, portal, written reason) ends a suspected-compromised customer's.
+  'session.revoke_own': { contributor: 'own' },
+  'session.revoke_all': { fidelity_admin: 'allow' },
+  // Sign-off of an access-review export. The command's guard refuses a
+  // reviewer who changed staff access during the reviewed period.
+  'role.review.signoff': { auditor: 'allow', fidelity_admin: 'allow' },
+  // Mandate changes awaiting the verifier's re-check: verifiers see their
+  // assigned wallets only (filtered in the query), oversight sees all.
+  'mandate.queue': { verifier: 'allow', fidelity_admin: 'allow', auditor: 'allow' },
+  // The family's own list of people on the wallet (ids, names, roles).
+  'wallet.people.view': { admin: 'allow', approver: 'allow' },
 };
 
 /** Actions that need a fresh step-up grant (docs/02 Step-up). */
@@ -417,6 +437,7 @@ export const PORTAL_ONLY_ACTIONS: ReadonlySet<Action> = new Set<Action>([
   'claim.route.unblock',
   'claim.route.unblock.approve',
   'recon.exception.resolve',
+  'session.revoke_all',
 ]);
 
 /** Who an unavailable-approver escalation goes to, per maker action. */

@@ -3,7 +3,7 @@
 // mirror. The ONLY code that changes `claim_status_mirror` or posts a BENEFIT
 // journal is in this file (applySnapshot / creditBenefit); its inputs come
 // from the Fidelity adapter only — never from AI/OCR output or a person.
-import { ConflictError, NotFoundError, enqueueOutbox, sha256Hex, type Actor, type Command, type CommandTx } from '@chema/core';
+import { ConflictError, NotFoundError, enqueueOutbox, grantWalletRole, sha256Hex, type Actor, type Command, type CommandTx } from '@chema/core';
 import { ensureSystemAccount, listWalletAccounts, placeHold, post } from '@chema/ledger';
 import { openCase, raiseException } from '@chema/payments';
 import { money, type Currency } from '@chema/shared';
@@ -285,6 +285,10 @@ async function applySnapshot(tx: CommandTx, actor: Actor, deps: ClaimsDeps, star
           base,
         );
         await tx.query("UPDATE fidelity_link SET route_status = 'APPROVED' WHERE id = $1", [link.id]);
+        // Fidelity's route names its beneficiary; if that is the person the family declared, record it.
+        if (link.proposed_recipient && link.proposed_recipient_id_hash === recipientHash(deps, route.recipient.idNumber)) {
+          await grantWalletRole(tx, { walletId: wallet.id, personId: link.proposed_recipient, role: 'POLICY_BENEFICIARY', source: 'FIDELITY_ROUTE', grantedBy: null });
+        }
         outcomes.push('ROUTE_DIRECT');
       } else if (link.proposed_recipient && link.proposed_recipient_id_hash === recipientHash(deps, route.recipient.idNumber)) {
         await tx.query(
@@ -293,6 +297,11 @@ async function applySnapshot(tx: CommandTx, actor: Actor, deps: ClaimsDeps, star
           [...base, link.proposed_recipient],
         );
         await tx.query("UPDATE fidelity_link SET route_status = 'APPROVED' WHERE id = $1", [link.id]);
+        // Two facts from Fidelity's approved route, each its own role row: the policy
+        // beneficiary it names is this person, and the benefit is routed to them.
+        for (const role of ['POLICY_BENEFICIARY', 'PAYOUT_RECIPIENT'] as const) {
+          await grantWalletRole(tx, { walletId: wallet.id, personId: link.proposed_recipient, role, source: 'FIDELITY_ROUTE', grantedBy: null });
+        }
         outcomes.push('ROUTE_APPROVED');
       } else {
         // Proposed recipient ≠ policy beneficiary: case + hold on the benefit source only (docs/07 §5).
