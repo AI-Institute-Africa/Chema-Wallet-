@@ -114,6 +114,9 @@ async function write(
   );
   const shape = validateJournal(input.entries, accounts, { reversal });
   validateBenefitRules(input.kind, input.entries, accounts, { reversal });
+  // Manual adjustments exist only as the output of an approved maker-checker
+  // request (P09 `ledger.adjust`); the database enforces the same (0017).
+  if (input.kind === 'ADJUSTMENT' && !reversal && !input.approvalRef) throw new LedgerValidationError('APPROVAL_REQUIRED');
   const hash = journalHash(input, reversesJournalId);
   const debits = [...shape.walletDebits];
   if (isPayout && debits.length !== 1) throw new LedgerValidationError('PAYOUT_DEBITS_ONE_ACCOUNT');

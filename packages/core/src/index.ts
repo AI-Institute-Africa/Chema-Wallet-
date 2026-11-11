@@ -13,7 +13,7 @@ export * from './documents/store';
 export * from './documents/service';
 export * from './identity/otp';
 export { AuthService, PhoneE164, type LoginChannel } from './identity/auth';
-export { StaffAuthService, type StaffAuthenticator } from './identity/staff';
+export { StaffAuthService, type StaffAuthenticator, type StaffEnrollInput, type StaffEnrollment } from './identity/staff';
 export { AUTH_LIMITS, StepUpGrants, type StepUpTarget, type IssuedSession } from './identity/sessions';
 export { totp, verifyTotp, base32Decode, base32Encode } from './identity/totp';
 export { enqueueOutbox, OutboxRelay, InMemoryJobQueue, type JobQueue } from './outbox/outbox';

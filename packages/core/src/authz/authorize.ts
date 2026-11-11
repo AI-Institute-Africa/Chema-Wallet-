@@ -1,7 +1,7 @@
 // authorize(actor, action, subject): deny by default, server-side, case-scoped.
 // Pure decision function + a DB-backed Authorizer that loads relations.
 import type { Queryable } from '@chema/shared';
-import { isAction, MATRIX, type Action, type Principal, type Rule } from './matrix';
+import { isAction, MATRIX, PORTAL_ONLY_ACTIONS, type Action, type Principal, type Rule } from './matrix';
 import { NO_RELATIONS, type Actor, type Relations, type Subject, type WalletRoleName } from './types';
 
 export interface Decision {
@@ -118,6 +118,7 @@ export function authorize(input: AuthzInput): Decision {
   const { actor, action } = input;
   if (!isAction(action)) return deny('UNKNOWN_ACTION');
   if (actor.kind === 'STAFF' && !actor.mfa) return deny('MFA_REQUIRED');
+  if (PORTAL_ONLY_ACTIONS.has(action) && actor.kind !== 'SYSTEM' && actor.channel !== 'ADMIN') return deny('PORTAL_ONLY');
 
   const cells = MATRIX[action];
   const principals = principalsOf(actor, input.relations);

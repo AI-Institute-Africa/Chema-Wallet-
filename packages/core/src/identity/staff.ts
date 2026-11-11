@@ -33,6 +33,20 @@ interface StaffRow {
 
 const totpAad = (staffId: string) => `staff_totp:${staffId}`;
 
+export interface StaffEnrollInput {
+  login: string;
+  role: StaffRole;
+  password: string;
+  name?: string;
+}
+
+export interface StaffEnrollment {
+  staffId: string;
+  personId: string;
+  totpSecret: string;
+  otpauth: string;
+}
+
 export class StaffAuthService implements StaffAuthenticator {
   private readonly clock: Clock;
 
@@ -47,42 +61,13 @@ export class StaffAuthService implements StaffAuthenticator {
   }
 
   /**
-   * Provision a staff account. Returns the TOTP secret ONCE for enrolment.
-   * Bootstrap/seed use only until the role-admin UI (P09) wraps it in a command.
+   * Provision a staff account from code (seed CLI, tests). Returns the TOTP
+   * secret ONCE for enrolment. The portal path is the `staff.enroll` bus
+   * command (P09, @chema/ops), which calls enrollIn inside its transaction.
    */
-  async enroll(input: {
-    login: string;
-    role: StaffRole;
-    password: string;
-    name?: string;
-    enrolledBy: string;
-  }): Promise<{ staffId: string; personId: string; totpSecret: string; otpauth: string }> {
-    if (!/^[a-z0-9._@-]{3,64}$/.test(input.login)) throw new ValidationError('invalid login');
-    const passwordHash = await hashPassword(input.password);
-    const secret = newTotpSecret();
+  async enroll(input: StaffEnrollInput & { enrolledBy: string }): Promise<StaffEnrollment> {
     return this.deps.db.transaction(async (tx) => {
-      const { rows: p } = await tx.query<{ id: string }>('INSERT INTO person (name) VALUES ($1) RETURNING id', [
-        input.name ?? null,
-      ]);
-      const personId = one(p, 'person insert').id;
-      const staffId = randomUUID();
-      await tx.query(
-        `INSERT INTO staff_account (id, person_id, login, staff_role, password_hash, totp_secret_enc)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [
-          staffId,
-          personId,
-          input.login,
-          input.role,
-          passwordHash,
-          sealString(this.deps.secrets.dataKey, base32Encode(secret), totpAad(staffId)),
-        ],
-      );
-      await tx.query(
-        `INSERT INTO identity_binding (person_id, channel, handle, method, verified_at)
-         VALUES ($1, 'ADMIN', $2, 'PASSWORD_TOTP', now())`,
-        [personId, input.login],
-      );
+      const out = await this.enrollIn(tx, input);
       await this.deps.audit.record(
         this.event({
           action: 'staff.enroll',
@@ -90,14 +75,61 @@ export class StaffAuthService implements StaffAuthenticator {
           actorRole: 'SYSTEM',
           channel: 'SYSTEM',
           subjectType: 'staff_account',
-          subjectId: staffId,
+          subjectId: out.staffId,
           authzResult: 'ALLOWED',
           after: { role: input.role, login: input.login },
         }),
         tx,
       );
-      return { staffId, personId, totpSecret: base32Encode(secret), otpauth: otpauthUri('Chema Wallet', input.login, secret) };
+      return out;
     });
+  }
+
+  /** Insert the person, staff account (sealed TOTP secret) and ADMIN binding. No audit: the caller audits. */
+  async enrollIn(tx: Queryable, input: StaffEnrollInput): Promise<StaffEnrollment> {
+    if (!/^[a-z0-9._@-]{3,64}$/.test(input.login)) throw new ValidationError('invalid login');
+    if (input.password.length < 12 || input.password.length > 200) throw new ValidationError('password must be 12-200 characters');
+    const { rows: taken } = await tx.query('SELECT 1 FROM staff_account WHERE login = $1', [input.login]);
+    if (taken.length > 0) throw new ValidationError('login taken');
+    const passwordHash = await hashPassword(input.password);
+    const secret = newTotpSecret();
+    const { rows: p } = await tx.query<{ id: string }>('INSERT INTO person (name) VALUES ($1) RETURNING id', [input.name ?? null]);
+    const personId = one(p, 'person insert').id;
+    const staffId = randomUUID();
+    await tx.query(
+      `INSERT INTO staff_account (id, person_id, login, staff_role, password_hash, totp_secret_enc)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [staffId, personId, input.login, input.role, passwordHash, sealString(this.deps.secrets.dataKey, base32Encode(secret), totpAad(staffId))],
+    );
+    await tx.query(
+      `INSERT INTO identity_binding (person_id, channel, handle, method, verified_at)
+       VALUES ($1, 'ADMIN', $2, 'PASSWORD_TOTP', now())`,
+      [personId, input.login],
+    );
+    return { staffId, personId, totpSecret: base32Encode(secret), otpauth: otpauthUri('Chema Wallet', input.login, secret) };
+  }
+
+  /**
+   * Disable / re-enable a staff account inside the caller's transaction.
+   * Disabling also revokes every live session of that person at once.
+   */
+  async setDisabledIn(tx: Queryable, staffId: string, disabled: boolean): Promise<{ personId: string; changed: boolean }> {
+    const { rows } = await tx.query<{ person_id: string; disabled_at: Date | null }>(
+      'SELECT person_id, disabled_at FROM staff_account WHERE id = $1 FOR UPDATE',
+      [staffId],
+    );
+    const row = rows[0];
+    if (!row) throw new ValidationError('unknown staff account');
+    if ((row.disabled_at !== null) === disabled) return { personId: row.person_id, changed: false };
+    await tx.query(
+      `UPDATE staff_account SET disabled_at = ${disabled ? 'now()' : 'NULL'}, failed_attempts = 0, locked_until = NULL, updated_at = now()
+        WHERE id = $1`,
+      [staffId],
+    );
+    if (disabled) {
+      await tx.query('UPDATE auth_session SET revoked_at = now() WHERE staff_id = $1 AND revoked_at IS NULL', [staffId]);
+    }
+    return { personId: row.person_id, changed: true };
   }
 
   private secretOf(row: StaffRow): Buffer {
