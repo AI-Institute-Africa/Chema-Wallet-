@@ -6,7 +6,7 @@ import { ConflictError, NotFoundError, type FlagService } from '@chema/core';
 import { getBalances } from '@chema/ledger';
 import { disclosureOf, quoteFees, type FeeDisclosure, type RailRegistry } from '@chema/payments';
 import { money, parseMinor, t, type Currency, type Locale, type Money, type Queryable } from '@chema/shared';
-import { badgeFor, loadPublicWallet, publicUrl, shareLinks, type WalletRow } from '@chema/wallet';
+import { badgeFor, loadPublicWallet, loadPublicWalletPage, publicUrl, shareLinks, type WalletRow } from '@chema/wallet';
 import { privacyOf, type PrivacySettings, type PublicPageView, type PublicTribute } from './types';
 
 export interface PublicDeps {
@@ -51,6 +51,21 @@ async function paidOut(q: Queryable, walletId: string, ccy: Currency): Promise<M
     if (b.account.currency === ccy && (b.account.kind === 'COMMUNITY' || b.account.kind === 'GROUP')) total += b.paid.minor;
   }
   return money(total, ccy);
+}
+
+/**
+ * Contributor-facing usage summary (docs/08): confirmed payouts from the
+ * community/group money, by purpose only — no payee, number or date. Reversed
+ * payouts are not counted.
+ */
+async function usageByPurpose(q: Queryable, walletId: string, ccy: Currency): Promise<{ purpose: string; amount: Money }[]> {
+  const { rows } = await q.query<{ purpose: string; total: string }>(
+    `SELECT purpose, sum(amount_minor)::text AS total FROM payout_request
+      WHERE wallet_id = $1 AND currency = $2 AND status = 'CONFIRMED' AND source_kind IN ('COMMUNITY', 'GROUP')
+      GROUP BY purpose ORDER BY purpose`,
+    [walletId, ccy],
+  );
+  return rows.map((r) => ({ purpose: r.purpose, amount: money(parseMinor(r.total), ccy) }));
 }
 
 /** A photo is public only with live consent AND the family's showPhoto toggle. */
@@ -116,7 +131,8 @@ export async function contributionLimits(q: Queryable, flags: FlagService, ccy: 
 }
 
 export async function publicPage(q: Queryable, deps: PublicDeps, slug: string, locale: Locale = 'en'): Promise<PublicPageView> {
-  const w = await loadPublicWallet(q, slug);
+  const w = await loadPublicWalletPage(q, slug);
+  const closed = w.status !== 'ACTIVE';
   const x = await extras(q, w.id);
   const p = privacyOf(x.privacy);
   const url = publicUrl(deps.publicBaseUrl, slug);
@@ -134,12 +150,13 @@ export async function publicPage(q: Queryable, deps: PublicDeps, slug: string, l
     totals: p.showTotal
       ? { raised: await raisedTotal(q, w.id, ccy), target: w.target_minor ? money(parseMinor(w.target_minor), ccy) : null }
       : null,
-    usage: p.showUsageSummary ? { paidOut: await paidOut(q, w.id, ccy) } : null,
+    closed,
+    usage: p.showUsageSummary ? { paidOut: await paidOut(q, w.id, ccy), byPurpose: await usageByPurpose(q, w.id, ccy) } : null,
     tributes: p.showTributes ? await publicTributes(q, w, p, { locale }) : null,
     contribute: {
       currency: ccy,
       // No ceiling agreed ⇒ no rails offered: the page shows that contributions are not open.
-      rails: (await deps.flags.getIn(q, 'contributions.enabled')) && limits.max ? await deps.rails.listCollectable(q) : [],
+      rails: !closed && (await deps.flags.getIn(q, 'contributions.enabled')) && limits.max ? await deps.rails.listCollectable(q) : [],
       min: limits.min,
       max: limits.max,
       groupsEnabled: await deps.flags.getIn(q, 'feature.group_contributions'),

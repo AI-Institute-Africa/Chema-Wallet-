@@ -65,7 +65,13 @@ export function registerRoutes(app: FastifyInstance, core: CoreServices): void {
     if (err instanceof ConflictError) {
       // MissingEvidenceError (P04) names what is missing; nothing sensitive.
       const missing = (err as { missing?: unknown }).missing;
-      return reply.code(409).send({ error: err.reason.toLowerCase(), ...(Array.isArray(missing) ? { missing } : {}) });
+      // ClosureBlockedError (P07) names the unmet closure preconditions.
+      const blockers = (err as { blockers?: unknown }).blockers;
+      return reply.code(409).send({
+        error: err.reason.toLowerCase(),
+        ...(Array.isArray(missing) ? { missing } : {}),
+        ...(Array.isArray(blockers) ? { blockers } : {}),
+      });
     }
     if (err instanceof RateLimitedError) return reply.code(429).send({ error: 'rate_limited' });
     // Forged / stale provider callback: nothing was stored.

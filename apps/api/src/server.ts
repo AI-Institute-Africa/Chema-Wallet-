@@ -7,6 +7,7 @@ import { buildContributions, type ContributionsWiring } from './contributions';
 import { buildClaims, type ClaimsWiring } from './fidelity';
 import { chooseOtpProvider } from './otp';
 import { buildPayments, type PaymentsWiring } from './payments';
+import { buildPayouts } from './payouts';
 import type { WalletWiring } from './wallet-routes';
 
 const port = Number(process.env['PORT'] ?? 7600);
@@ -64,6 +65,9 @@ const contributions: ContributionsWiring | undefined =
 // P06: Fidelity claim path (mock adapter outside production; flag off by default).
 const claims: ClaimsWiring | undefined = core && secrets ? buildClaims(core, secrets) : undefined;
 
+// P07: payouts, governance, closure (payouts.enabled + rail flags off by default).
+const payouts = core && payments && secrets ? buildPayouts(core, payments.rails, secrets) : undefined;
+
 const app = buildApp({
   ...(db ? { db } : {}),
   ...(core ? { core } : {}),
@@ -71,6 +75,7 @@ const app = buildApp({
   ...(wallets ? { wallets } : {}),
   ...(contributions ? { contributions: contributions.service } : {}),
   ...(claims ? { claims: claims.service } : {}),
+  ...(payouts ? { payouts } : {}),
   // Web app origin(s) for CORS; defaults to the public web base URL.
   corsOrigins: parseOrigins(process.env['CHEMA_WEB_ORIGINS'] ?? publicBaseUrl),
   version: process.env['APP_VERSION'] ?? '0.0.0',

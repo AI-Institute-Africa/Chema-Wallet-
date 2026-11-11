@@ -73,6 +73,7 @@ const OWN_ROWS = new Set<Action>([
   'contribution.view_own',
   'receipt.reissue',
   'tribute.manage_own',
+  'approval.escalate',
 ]);
 
 function subjectFor(action: Action, persona: Persona): Subject {
@@ -166,6 +167,33 @@ const EXPECTED: Record<Action, Persona[]> = {
   // Assignment of the maker is checked in the command guard.
   'claim.route.unblock': ['claims'],
   'claim.route.unblock.approve': ['opsfin'],
+  // P07 (docs/08, docs/02 dual approval)
+  'payee.view': ['admin', 'approver', 'opsfin', 'auditor', 'fidelity_admin'],
+  'payout.view': ['admin', 'approver', 'agent', 'claims', 'opsfin', 'auditor', 'fidelity_admin'],
+  'payout.cancel': ['admin', 'opsfin'],
+  'payout.process': ['system'],
+  'payout.override': ['opsfin'],
+  'payout.override.approve': ['opsfin'],
+  // Only the approval's maker (owner) may escalate it.
+  'approval.escalate': CUSTOMERS,
+  'mandate.change': ['admin', 'approver'],
+  // fidelity_admin only once escalated (tested below).
+  'mandate.change.approve': ['admin', 'approver'],
+  'mandate.verify': ['verifier'],
+  'mandate.execute': ['admin', 'approver'],
+  'case.open': ['admin', 'approver', 'claims', 'opsfin', 'fidelity_admin'],
+  'case.view': ['admin', 'approver', 'claims', 'opsfin', 'auditor', 'fidelity_admin'],
+  'case.assign': ['opsfin', 'fidelity_admin'],
+  'case.update': ['claims', 'opsfin', 'fidelity_admin'],
+  'case.resolve': ['claims', 'opsfin', 'fidelity_admin'],
+  'case.process': ['system'],
+  'hold.place': ['claims', 'opsfin', 'fidelity_admin'],
+  'hold.release': ['opsfin', 'fidelity_admin'],
+  'hold.release.approve': ['opsfin', 'fidelity_admin'],
+  'wallet.close': ['admin', 'fidelity_admin'],
+  'wallet.close.finalise': ['admin', 'opsfin', 'fidelity_admin'],
+  'wallet.thank_contributors': ['admin'],
+  'wallet.statement.view': ['admin', 'approver', 'opsfin', 'auditor', 'fidelity_admin'],
 };
 
 describe('permission matrix — every cell', () => {
@@ -292,6 +320,37 @@ describe('maker-checker cells', () => {
   it('checker cell without a maker on the subject is denied', () => {
     const d = authorize({ ...P.approver, action: 'payout.approve', subject: { type: 'approval', id: 'a1', walletId: W }, payoutHighValueMinor: null });
     expect(d).toMatchObject({ allowed: false, reason: 'NO_MAKER' });
+  });
+});
+
+describe('escalated approvals (unavailable approver, docs/02)', () => {
+  const sub = (over: Partial<Subject>): Subject => ({ type: 'approval', id: 'a1', walletId: W, makerPersonId: OTHER, amountMinor: 10_00n, ...over });
+
+  it('ops/finance checks an escalated payout even below the threshold / with it unset', () => {
+    const d = authorize({ ...P.opsfin, action: 'payout.approve', subject: sub({ escalatedTo: 'OPS_FINANCE' }), payoutHighValueMinor: null });
+    expect(d.allowed).toBe(true);
+  });
+
+  it('an escalation to FIDELITY_ADMIN does not let ops/finance check', () => {
+    const d = authorize({ ...P.opsfin, action: 'payout.approve', subject: sub({ escalatedTo: 'FIDELITY_ADMIN' }), payoutHighValueMinor: null });
+    expect(d).toMatchObject({ allowed: false, reason: 'ESCALATED_ELSEWHERE' });
+  });
+
+  it('fidelity_admin checks an escalated admin replacement / mandate change, never un-escalated ones', () => {
+    for (const action of ['wallet.replace_admin.approve', 'mandate.change.approve'] as const) {
+      expect(authorize({ ...P.fidelity_admin, action, subject: sub({ escalatedTo: 'FIDELITY_ADMIN' }), payoutHighValueMinor: null }).allowed).toBe(true);
+      expect(authorize({ ...P.fidelity_admin, action, subject: sub({}), payoutHighValueMinor: null })).toMatchObject({ allowed: false, reason: 'NOT_ESCALATED' });
+    }
+  });
+
+  it('ops/finance checks an escalated destination change', () => {
+    const d = authorize({ ...P.opsfin, action: 'wallet.change_payout_destination.approve', subject: sub({ escalatedTo: 'OPS_FINANCE' }), payoutHighValueMinor: null });
+    expect(d.allowed).toBe(true);
+  });
+
+  it('escalation never lets the maker check their own request', () => {
+    const d = authorize({ ...P.opsfin, action: 'payout.approve', subject: sub({ escalatedTo: 'OPS_FINANCE', makerPersonId: 'p-opsfin' }), payoutHighValueMinor: null });
+    expect(d).toMatchObject({ allowed: false, reason: 'MAKER_CANNOT_CHECK' });
   });
 });
 

@@ -13,6 +13,9 @@ import { closeCase, EXCEPTION_OWNER_ROLE, openCase, raiseException, slaDue } fro
 import { isUuid, loadPayment, loadPaymentByProviderRef, transition } from './store';
 import type { PaymentRow } from './types';
 
+/** Outbox topic the payouts worker consumes: `{ rail, providerRef, reference? }`. */
+export const PAYOUT_EVENT_TOPIC = 'payout.event';
+
 export interface ReceiveInput {
   rail: string;
   event: ProviderEvent;
@@ -155,6 +158,13 @@ async function handle(tx: CommandTx, ctx: ApplyCtx, rail: string, eventRowId: st
   if (!adapter) return { outcome: 'UNKNOWN_RAIL', paymentId: null };
 
   if (e.type === 'REFUND_SUCCEEDED' || e.type === 'REFUND_FAILED') return refundOutcome(tx, ctx, rail, e);
+  // Payout callbacks are triggers only (P07): the payouts worker re-reads the
+  // payout from the provider before it changes anything.
+  if (e.type === 'PAYOUT_SUCCEEDED' || e.type === 'PAYOUT_FAILED' || e.type === 'PAYOUT_REVERSED') {
+    if (e.merchantRef !== adapter.merchantRef) return { outcome: 'WRONG_MERCHANT', paymentId: null };
+    await enqueueOutbox(tx, PAYOUT_EVENT_TOPIC, { rail, providerRef: e.providerRef, ...(e.reference ? { reference: e.reference } : {}) });
+    return { outcome: 'PAYOUT_TRIGGER', paymentId: null };
+  }
 
   const p = await findPayment(tx, rail, e);
   if (!p) {

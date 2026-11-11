@@ -92,6 +92,19 @@ export async function loadWallet(q: Queryable, walletId: string, lock = false): 
   return row;
 }
 
+/**
+ * Public page lookup that also shows a CLOSING/CLOSED wallet (docs/08: the
+ * page shows the closed state). Everything else (QR, quote, contribute,
+ * report) keeps using loadPublicWallet: ACTIVE only.
+ */
+export async function loadPublicWalletPage(q: Queryable, slug: string): Promise<WalletRow> {
+  if (!/^[a-z2-7]{26}$/.test(slug)) throw new NotFoundError('wallet', 'public');
+  const { rows } = await q.query<WalletRow>(`SELECT ${WALLET_COLS} FROM wallet WHERE public_slug = $1`, [slug]);
+  const row = rows[0];
+  if (!row || !['ACTIVE', 'CLOSING', 'CLOSED'].includes(row.status)) throw new NotFoundError('wallet', 'public');
+  return row;
+}
+
 /** Public lookup: unknown slug and every non-ACTIVE status are the same 404. */
 export async function loadPublicWallet(q: Queryable, slug: string): Promise<WalletRow> {
   if (!/^[a-z2-7]{26}$/.test(slug)) throw new NotFoundError('wallet', 'public');

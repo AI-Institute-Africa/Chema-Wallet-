@@ -57,6 +57,18 @@ export const en = {
   'funds.benefit.route_blocked': 'The benefit is on hold while Fidelity confirms who should receive it. Community contributions are not affected.',
   'funds.benefit.declined': 'Fidelity did not approve the claim. Community contributions are not affected.',
   'funds.benefit.payment_pending': 'Fidelity approved the benefit; the payment has not settled yet.',
+  // P07 payouts + closure (docs/08). Notifications never carry the payee's number.
+  'payout.notice.confirmed': 'Chema Wallet: a payout of {amount} was completed.',
+  'payout.notice.failed': 'Chema Wallet: a payout of {amount} did not go through. The money is back in the wallet; please check the app.',
+  'page.closed': 'This funeral wallet is closed. Contributions are no longer being accepted. Thank you for your support.',
+  'page.usage.title': 'How contributions were used',
+  'payout.purpose.parlour': 'Funeral parlour',
+  'payout.purpose.transport': 'Transport',
+  'payout.purpose.food': 'Food',
+  'payout.purpose.church': 'Church',
+  'payout.purpose.family_beneficiary': 'Family',
+  'payout.purpose.other_approved': 'Other approved costs',
+  'closure.thank_you': 'The family of the late {name} thanks you for your support. The funeral wallet is now closed.',
 } as const;
 
 export type MessageKey = keyof typeof en;

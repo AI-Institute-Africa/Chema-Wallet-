@@ -1,6 +1,6 @@
 export * from './errors';
 export * from './secrets';
-export { canonicalJson, sha256Hex, hmacHex, safeEqual, randomToken, seal, open as unseal } from './crypto';
+export { canonicalJson, sha256Hex, hmacHex, safeEqual, randomToken, seal, open as unseal, sealString, openString } from './crypto';
 export * from './audit/sink';
 export { verifyChain, GENESIS_HASH, type ChainReport, type ChainProblem } from './audit/chain';
 export * from './authz/types';

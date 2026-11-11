@@ -3,7 +3,7 @@
 // notification services. `pump()` plays the worker: relays the outbox and runs
 // the same handlers the worker runs. Never import at runtime.
 import { randomUUID } from 'node:crypto';
-import { InMemoryJobQueue, OutboxRelay, ephemeralSecrets, publicActor, type Actor, type FlagKey } from '@chema/core';
+import { InMemoryJobQueue, OutboxRelay, ephemeralSecrets, publicActor, type Actor, type FlagKey, type Secrets } from '@chema/core';
 import { MockSender, NotificationService } from '@chema/channels';
 import { PaymentService, RailRegistry } from '@chema/payments';
 import { MockCard, MockEcoCash, MockOneMoney, type MockRail } from '@chema/providers';
@@ -17,6 +17,8 @@ export { PUBLIC_BASE };
 export const WEBHOOK_SECRET = 'test-webhook-secret-p05';
 
 export interface ContributionHarness extends WalletHarness {
+  /** Platform secrets of this harness (notifications are sealed with secrets.dataKey). */
+  secrets: Secrets;
   payments: PaymentService;
   contributions: ContributionService;
   notifications: NotificationService;
@@ -68,6 +70,7 @@ export async function createContributionHarness(
 
   const t: ContributionHarness = {
     ...w,
+    secrets,
     payments,
     contributions,
     notifications,

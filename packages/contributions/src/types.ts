@@ -124,8 +124,10 @@ export interface PublicPageView {
   photoPath: string | null;
   /** null ⇒ the family hides the total (and target/progress). */
   totals: { raised: Money; target: Money | null } | null;
-  /** null ⇒ hidden. */
-  usage: { paidOut: Money } | null;
+  /** true ⇒ the wallet is closing/closed: no contributions, no share links. */
+  closed: boolean;
+  /** null ⇒ hidden. Anonymised: purposes and amounts only, never payees. */
+  usage: { paidOut: Money; byPurpose: { purpose: string; amount: Money }[] } | null;
   /** null ⇒ the family hides tributes. Newest first, never ranked by amount. */
   tributes: PublicTribute[] | null;
   contribute: { currency: Money['ccy']; rails: string[]; min: Money; max: Money | null; groupsEnabled: boolean };

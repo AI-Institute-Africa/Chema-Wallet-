@@ -15,10 +15,13 @@ import { CONTRIBUTION_TOPICS } from '@chema/contributions';
 import { NOTIFICATION_TOPIC } from '@chema/channels';
 import { WALLET_TOPICS } from '@chema/wallet';
 import { CLAIM_TOPICS, FIDELITY_EVENT_TOPIC } from '@chema/fidelity';
+import { PAYOUT_EVENT_TOPIC } from '@chema/payments';
+import { PAYOUT_TOPICS } from '@chema/payouts';
 import { z } from 'zod';
 import { buildContributions } from './contributions';
 import { buildClaims } from './fidelity';
 import { buildPayments } from './payments';
+import { buildPayouts } from './payouts';
 
 const log = createLogger(process.env['LOG_LEVEL'] ?? 'info');
 const databaseUrl = process.env['DATABASE_URL'];
@@ -42,6 +45,7 @@ const contributions = buildContributions(core, payments.service, {
 });
 
 const claims = buildClaims(core, secrets);
+const payouts = buildPayouts(core, payments.rails, secrets);
 
 const DocPayload = z.object({ documentId: z.uuid() });
 const EventPayload = z.object({ eventRowId: z.uuid() });
@@ -50,6 +54,8 @@ const PaymentFinalPayload = z.object({ paymentId: z.uuid() }).loose();
 const NotificationPayload = z.object({ notificationId: z.uuid() });
 const PurgePayload = z.object({ documentId: z.uuid(), storageRef: z.string() });
 const WalletEventPayload = z.object({ walletId: z.uuid() }).loose();
+const PayoutTopicPayload = z.object({ walletId: z.uuid().nullable().optional() }).loose();
+const PayoutEventPayload = z.object({ rail: z.string().regex(/^[A-Z][A-Z0-9_]{1,31}$/), providerRef: z.string().min(1).max(128), reference: z.string().max(128).optional() });
 
 // Wallet lifecycle events (docs/05). Family/staff notification channels are
 // D16 + P08/P09; until then each event is acknowledged and logged (ids only).
@@ -64,8 +70,26 @@ const walletHandlers = Object.fromEntries(
   ]),
 );
 
+// P07 payout / case / hold / closure events: logged (ids only) until P08/P09 notify staff.
+const payoutTopicHandlers = Object.fromEntries(
+  PAYOUT_TOPICS.map((topic) => [
+    topic,
+    async (payload: unknown) => {
+      const { walletId } = PayoutTopicPayload.parse(payload);
+      log.info({ topic, walletId }, 'payout/governance event (logged)');
+    },
+  ]),
+);
+
 const outboxWorker = createOutboxWorker(redisUrl, {
   ...walletHandlers,
+  ...payoutTopicHandlers,
+  // Payout callback = trigger only: re-read the payout from the provider (idempotent).
+  [PAYOUT_EVENT_TOPIC]: async (payload) => {
+    const { rail, providerRef, reference } = PayoutEventPayload.parse(payload);
+    const r = await payouts.processEvent({ rail, providerRef, ...(reference ? { reference } : {}) });
+    log.info({ outcome: r }, 'payout event');
+  },
   'document.scan': async (payload) => {
     const { documentId } = DocPayload.parse(payload);
     await core.bus.execute(core.documents.applyScan, { documentId }, { actor: SYSTEM_ACTOR });
@@ -160,6 +184,32 @@ async function fidelityLoop(): Promise<void> {
   }
 }
 
+/** Payouts: decisions taken elsewhere, due submissions/retries, status polls, payee checks. */
+async function payoutLoop(): Promise<void> {
+  while (!stopping) {
+    try {
+      const r = await payouts.runDue();
+      if (r.advanced || r.submitted || r.polled || r.payees) log.info(r, 'payout run');
+    } catch (err) {
+      log.error({ err }, 'payout loop error');
+    }
+    await new Promise((r) => setTimeout(r, 30_000));
+  }
+}
+
+/** Case + recon-exception ageing / escalation (docs/14 §O). */
+async function governanceLoop(): Promise<void> {
+  while (!stopping) {
+    try {
+      const r = await payouts.sweep();
+      if (r.casesEscalated || r.exceptionsEscalated || r.holdsDueForReview) log.info(r, 'governance sweep');
+    } catch (err) {
+      log.error({ err }, 'governance sweep error');
+    }
+    await new Promise((r) => setTimeout(r, 15 * 60_000));
+  }
+}
+
 /** Daily reconciliation of yesterday, every rail; re-running a day is idempotent. */
 async function reconLoop(): Promise<void> {
   while (!stopping) {
@@ -201,3 +251,5 @@ void pollLoop();
 void notifyLoop();
 void reconLoop();
 void fidelityLoop();
+void payoutLoop();
+void governanceLoop();

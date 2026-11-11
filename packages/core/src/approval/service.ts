@@ -6,8 +6,8 @@
 // - Unavailable approver ⇒ escalation (P07), never a bypass.
 import type { Currency, Queryable } from '@chema/shared';
 import type { Command, CommandTx } from '../command/bus';
-import { CHECKER_ACTION, type Action } from '../authz/matrix';
-import type { Actor, Subject } from '../authz/types';
+import { CHECKER_ACTION, ESCALATION_ROLE, type Action } from '../authz/matrix';
+import type { Actor, StaffRole, Subject } from '../authz/types';
 import { actorRoleLabel } from '../authz/types';
 import { canonicalJson, sha256Hex } from '../crypto';
 import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
@@ -19,6 +19,9 @@ export const ALWAYS_DUAL: ReadonlySet<Action> = new Set<Action>([
   'wallet.replace_admin',
   'ledger.adjust',
   'config.change',
+  'mandate.change',
+  'hold.release',
+  'payout.override',
 ]);
 
 export function payloadHash(payload: unknown): string {
@@ -48,10 +51,13 @@ export interface ApprovalRow {
   checker_id: string | null;
   decision: 'APPROVED' | 'REJECTED' | null;
   consumed_at: Date | null;
+  created_at: Date;
+  escalated_at: Date | null;
+  escalated_to: StaffRole | null;
 }
 
 const SELECT = `SELECT id, action, subject_type, subject_id, wallet_id, payload_hash, amount_minor::text AS amount_minor,
-                       currency, maker_id, checker_id, decision, consumed_at FROM approval`;
+                       currency, maker_id, checker_id, decision, consumed_at, created_at, escalated_at, escalated_to FROM approval`;
 
 export async function loadApproval(q: Queryable, id: string): Promise<ApprovalRow | undefined> {
   if (!/^[0-9a-f-]{36}$/i.test(id)) return undefined;
@@ -66,14 +72,16 @@ export interface ApprovalRequest {
   walletId?: string;
   payload: unknown;
   amount?: { minor: bigint; ccy: Currency };
+  /** The maker's clock (escalation timing); defaults to the database's now(). */
+  createdAt?: Date;
 }
 
 /** Called from inside a maker command handler (so it is authorised + audited by the bus). */
 export async function createApproval(tx: CommandTx, maker: Actor, req: ApprovalRequest): Promise<string> {
   if (!CHECKER_ACTION[req.action]) throw new ConflictError('NOT_AN_APPROVABLE_ACTION');
   const { rows } = await tx.query<{ id: string }>(
-    `INSERT INTO approval (action, subject_type, subject_id, wallet_id, payload_hash, amount_minor, currency, maker_id, maker_role)
-     VALUES ($1, $2, $3, $4, $5, $6::bigint, $7, $8, $9) RETURNING id`,
+    `INSERT INTO approval (action, subject_type, subject_id, wallet_id, payload_hash, amount_minor, currency, maker_id, maker_role, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6::bigint, $7, $8, $9, COALESCE($10::timestamptz, now())) RETURNING id`,
     [
       req.action,
       req.subjectType,
@@ -84,6 +92,7 @@ export async function createApproval(tx: CommandTx, maker: Actor, req: ApprovalR
       req.amount?.ccy ?? null,
       maker.personId,
       actorRoleLabel(maker),
+      req.createdAt?.toISOString() ?? null,
     ],
   );
   return one(rows, 'approval insert').id;
@@ -151,6 +160,7 @@ export const decideApproval: Command<DecideInput, { approvalId: string; decision
       makerPersonId: row.maker_id,
       ...(row.wallet_id ? { walletId: row.wallet_id } : {}),
       ...(row.amount_minor !== null ? { amountMinor: BigInt(row.amount_minor) } : {}),
+      ...(row.escalated_to ? { escalatedTo: row.escalated_to } : {}),
     };
     return { action, subject };
   },
@@ -167,3 +177,70 @@ export const decideApproval: Command<DecideInput, { approvalId: string; decision
     };
   },
 };
+
+/** Hours an approval waits for the family checker before its maker may escalate it. */
+export const ESCALATE_AFTER_HOURS = 24;
+
+export interface EscalateInput {
+  approvalId: string;
+  reason: string;
+}
+
+/**
+ * Unavailable approver => escalation path, never a bypass (docs/02). The maker
+ * hands an undecided approval to a distinct staff role (ESCALATION_ROLE); the
+ * family checker may still decide it until someone does. Allowed after
+ * ESCALATE_AFTER_HOURS, or at once when the wallet has no other live ADMIN /
+ * APPROVER who could check it (looked up here, never trusted from the client).
+ */
+export function escalateApproval(
+  clock: () => Date = () => new Date(),
+): Command<EscalateInput, { approvalId: string; escalatedTo: StaffRole }> {
+  return {
+    name: 'approval.escalate',
+    async resolve(q, input) {
+      const row = await loadApproval(q, input.approvalId);
+      if (!row) throw new NotFoundError('approval', input.approvalId);
+      return {
+        action: 'approval.escalate',
+        subject: { type: 'approval', id: row.id, ownerPersonId: row.maker_id, ...(row.wallet_id ? { walletId: row.wallet_id } : {}) },
+      };
+    },
+    async guard(q, input) {
+      const row = await loadApproval(q, input.approvalId);
+      return row && ESCALATION_ROLE[row.action] ? null : 'NOT_ESCALATABLE';
+    },
+    async run(tx, input, ctx) {
+      const reason = (input.reason ?? '').trim();
+      if (reason.length < 10 || reason.length > 500) throw new ConflictError('REASON_REQUIRED');
+      const row = await loadApproval(tx, input.approvalId);
+      if (!row) throw new NotFoundError('approval', input.approvalId);
+      const to = ESCALATION_ROLE[row.action];
+      if (!to) throw new ConflictError('NOT_ESCALATABLE');
+      if (row.decision !== null) throw new ConflictError('ALREADY_DECIDED');
+      if (row.escalated_at !== null) throw new ConflictError('ALREADY_ESCALATED');
+      const now = clock();
+      const waited = now.getTime() - new Date(row.created_at).getTime() >= ESCALATE_AFTER_HOURS * 3_600_000;
+      let noChecker = false;
+      if (!waited && row.wallet_id) {
+        const { rows } = await tx.query(
+          `SELECT 1 FROM wallet_role WHERE wallet_id = $1 AND role IN ('ADMIN', 'APPROVER') AND person_id <> $2
+              AND revoked_at IS NULL LIMIT 1`,
+          [row.wallet_id, row.maker_id],
+        );
+        noChecker = rows.length === 0;
+      }
+      if (!waited && !noChecker) throw new ConflictError('TOO_EARLY_TO_ESCALATE');
+      const { rows: done } = await tx.query(
+        `UPDATE approval SET escalated_at = $2, escalated_by = $3, escalated_to = $4, escalation_reason = $5
+          WHERE id = $1 AND decision IS NULL AND escalated_at IS NULL RETURNING id`,
+        [row.id, now.toISOString(), ctx.actor.personId, to, reason],
+      );
+      if (done.length !== 1) throw new ConflictError('ALREADY_DECIDED');
+      return {
+        result: { approvalId: row.id, escalatedTo: to },
+        audit: { approvalRef: row.id, reasonCode: noChecker ? 'NO_ELIGIBLE_CHECKER' : 'APPROVER_UNAVAILABLE', after: { escalatedTo: to } },
+      };
+    },
+  };
+}
