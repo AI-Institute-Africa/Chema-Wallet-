@@ -171,3 +171,77 @@ describe('no secrets in logs', () => {
     expect(all).not.toContain('263776000001');
   });
 });
+
+describe('gaps: sign out everywhere + device-bound sessions', () => {
+  const FLAG_ADMIN = { id: 'staff-flag-admin', role: 'FIDELITY_ADMIN', channel: 'ADMIN' };
+
+  async function loginOn(phone: string, device?: string): Promise<string> {
+    const start = await app.inject({ method: 'POST', url: '/auth/otp/start', payload: { phone } });
+    const { challengeId } = start.json<{ challengeId: string }>();
+    const verify = await app.inject({
+      method: 'POST',
+      url: '/auth/otp/verify',
+      payload: { challengeId, code: h.otp.lastCodeFor(phone) },
+      ...(device ? { headers: { 'x-device-id': device } } : {}),
+    });
+    expect(verify.statusCode).toBe(200);
+    return verify.json<{ token: string }>().token;
+  }
+
+  it('POST /auth/sessions/revoke-all ends every session of the caller, this one too', async () => {
+    const phone = '+263777100001';
+    const a = await loginOn(phone);
+    const b = await loginOn(phone);
+    const other = await loginOn('+263777100002');
+    const res = await app.inject({ method: 'POST', url: '/auth/sessions/revoke-all', headers: auth(b) });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ revoked: 2 });
+    for (const tok of [a, b]) expect((await app.inject({ method: 'GET', url: '/me/consents', headers: auth(tok) })).statusCode).toBe(401);
+    // Somebody else's session is untouched.
+    expect((await app.inject({ method: 'GET', url: '/me/consents', headers: auth(other) })).statusCode).toBe(200);
+  });
+
+  it('a staff session is bound to the device it logged in on: another or no device ⇒ 401 + audited', async () => {
+    const login = `binder.${randomUUID().slice(0, 8)}`;
+    const password = 'correct horse battery staple';
+    const e = await h.staffAuth.enroll({ login, role: 'AUDITOR', password, enrolledBy: 'system' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/staff/auth/login',
+      headers: { 'x-device-id': 'portal-laptop-1' },
+      payload: { login, password, totp: h.totpFor(e.totpSecret) },
+    });
+    expect(res.statusCode).toBe(200);
+    const token = res.json<{ token: string }>().token;
+    const get = (headers: Record<string, string>) => app.inject({ method: 'POST', url: '/auth/logout', headers: { ...auth(token), ...headers } });
+    expect((await get({ 'x-device-id': 'stolen-elsewhere' })).statusCode).toBe(401);
+    expect((await get({})).statusCode).toBe(401);
+    const { rows } = await h.db.query<{ reason_code: string; device: string | null }>(
+      `SELECT reason_code, device FROM audit_log WHERE action = 'identity.session' AND actor_id = $1 AND authz_result = 'DENIED' ORDER BY audit_log.seq`,
+      [e.personId],
+    );
+    expect(rows).toEqual([
+      { reason_code: 'DEVICE_MISMATCH', device: 'stolen-elsewhere' },
+      { reason_code: 'DEVICE_MISMATCH', device: null },
+    ]);
+    // The right device still works (logout ⇒ 204).
+    expect((await get({ 'x-device-id': 'portal-laptop-1' })).statusCode).toBe(204);
+  });
+
+  it('customer sessions are device-bound only with security.bind_customer_device on', async () => {
+    const token = await loginOn('+263777100003', 'phone-a');
+    const elsewhere = { ...auth(token), 'x-device-id': 'phone-b' };
+    // Flag off (default): a customer session is usable from another device.
+    expect((await app.inject({ method: 'GET', url: '/me/consents', headers: elsewhere })).statusCode).toBe(200);
+    await h.flags.set('security.bind_customer_device', true, FLAG_ADMIN, 'bind customer devices for the test');
+    try {
+      expect((await app.inject({ method: 'GET', url: '/me/consents', headers: elsewhere })).statusCode).toBe(401);
+      expect((await app.inject({ method: 'GET', url: '/me/consents', headers: { ...auth(token), 'x-device-id': 'phone-a' } })).statusCode).toBe(200);
+      // A session that recorded no device has nothing to bind to.
+      const unbound = await loginOn('+263777100004');
+      expect((await app.inject({ method: 'GET', url: '/me/consents', headers: { ...auth(unbound), 'x-device-id': 'phone-z' } })).statusCode).toBe(200);
+    } finally {
+      await h.flags.set('security.bind_customer_device', false, FLAG_ADMIN, 'restore the default after the test');
+    }
+  });
+});

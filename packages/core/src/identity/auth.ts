@@ -8,7 +8,7 @@ import type { Queryable, SqlClient } from '@chema/shared';
 import { z } from 'zod';
 import type { AuditEvent, AuditSink } from '../audit/sink';
 import { isAction, STEP_UP_ACTIONS, type Action } from '../authz/matrix';
-import type { Actor } from '../authz/types';
+import { actorRoleLabel, type Actor } from '../authz/types';
 import { hmacHex, safeEqual } from '../crypto';
 import { AuthenticationError, ForbiddenError, RateLimitedError, ValidationError } from '../errors';
 import type { Secrets } from '../secrets';
@@ -37,6 +37,13 @@ export interface AuthServiceDeps {
   secrets: Secrets;
   audit: AuditSink;
   clock?: Clock;
+  /** `security.bind_customer_device`; absent ⇒ customer sessions are not device-bound. */
+  bindCustomerDevice?: () => Promise<boolean>;
+}
+
+export interface PresentedCredentials {
+  /** The `x-device-id` the request carries (already shape-checked), if any. */
+  device?: string | undefined;
 }
 
 interface ChallengeRow {
@@ -226,8 +233,33 @@ export class AuthService {
     return personId;
   }
 
-  async authenticate(token: string): Promise<Actor | null> {
-    return sessionActor(this.deps.db, token, this.clock());
+  /**
+   * Bearer token → Actor, or null. A session that recorded a device at login
+   * is bound to it: staff sessions always, customer sessions when
+   * `security.bind_customer_device` is on. A request from another device (or
+   * none) is refused and audited (DEVICE_MISMATCH).
+   */
+  async authenticate(token: string, presented: PresentedCredentials = {}): Promise<Actor | null> {
+    const actor = await sessionActor(this.deps.db, token, this.clock());
+    if (!actor || actor.device === undefined || presented.device === actor.device) return actor;
+    const bound = actor.kind === 'STAFF' || (actor.kind === 'CUSTOMER' && (await this.deps.bindCustomerDevice?.()) === true);
+    if (!bound) return actor;
+    await this.deps.audit.record(
+      this.event({
+        action: 'identity.session',
+        actorId: actor.personId,
+        actorRole: actorRoleLabel(actor),
+        channel: actor.channel,
+        ...(actor.sessionId ? { sessionRef: actor.sessionId } : {}),
+        subjectType: 'auth_session',
+        subjectId: actor.sessionId ?? 'unknown',
+        authzResult: 'DENIED',
+        reasonCode: 'DEVICE_MISMATCH',
+        ...(actor.ip ? { ip: actor.ip } : {}),
+        ...(presented.device ? { device: presented.device } : {}),
+      }),
+    );
+    return null;
   }
 
   /** Live session held server-side (e.g. a bound WhatsApp conversation) → Actor, or null. */

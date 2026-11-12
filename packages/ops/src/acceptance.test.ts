@@ -167,7 +167,7 @@ describe('§G G5 — agent delegation + no self-approve', () => {
     const policyNo = x.fidelity.seed('APPROVED', { name: dn[0]?.deceased_name ?? '' });
     await x.consent(admin, walletId);
     await expect(x.claims.lookupPolicy(agent.actor, walletId, { policyNo })).resolves.toMatchObject({ outcome: 'ELIGIBLE' });
-    await x.claims.linkClaim(agent.actor, { walletId, recipientPersonId: admin.personId, recipientIdNumber: '63-123456X42' });
+    await x.claims.linkClaim(agent.actor, { walletId, recipientPersonId: admin.personId, recipientIdNumber: '63-123456X42', claimantPersonId: admin.personId });
     const { rows: linkAudit } = await x.h.db.query<{ authz_result: string }>(
       "SELECT authz_result FROM audit_log WHERE action = 'claim.link' AND actor_id = $1",
       [agent.personId],
@@ -261,50 +261,115 @@ describe('§S S8 — account compromise / step-up', () => {
     ).rejects.toBeInstanceOf(ForbiddenError);
   });
 
-  it.todo('GAP: "sign out everywhere" — a customer (or staff on their behalf) revokes every session of a compromised account; only AuthService.logout(own session) exists');
+  it('sign out everywhere: the customer ends every own session (and their step-up grants); a Fidelity admin does it for a suspected compromise', async () => {
+    t = await createOpsHarness();
+    const x = t;
+    const w = await x.fundedWallet(50_00n);
+    const payee = await x.activePayee(w.admin, w.approver, w.walletId);
+    const adminPhone = (await x.h.db.query<{ phone_e164: string }>('SELECT phone_e164 FROM person WHERE id = $1', [w.admin.personId])).rows[0]!.phone_e164;
+    const plan = (k: string) => ({
+      walletId: w.walletId,
+      source: { kind: 'COMMUNITY' as const },
+      currency: 'USD' as const,
+      parts: [{ payeeId: payee, amountMinor: 10_00n, purpose: 'PARLOUR' as const }],
+      idempotencyKey: k,
+    });
+
+    // Two live sessions (web + WhatsApp); an unused step-up grant sits on the first.
+    const second = await x.h.customer(adminPhone, 'WHATSAPP');
+    const staleGrant = await x.stepUp(w.admin, 'payout.request', w.walletId);
+    const out = await x.h.bus.execute(x.h.sessions.signOutEverywhere, {}, { actor: second.actor });
+    expect(out.revoked).toBeGreaterThanOrEqual(2);
+    for (const s of [w.admin, second]) {
+      expect(await x.h.auth.authenticate(s.token)).toBeNull();
+      expect(await x.h.auth.actorForSession(s.actor.sessionId!)).toBeNull();
+    }
+    // The grant died with its session, even presented with the captured Actor.
+    await expect(x.payouts.requestPayout(w.admin.actor, plan('plan-soe-0001'), staleGrant)).rejects.toThrow('STEP_UP_REQUIRED');
+    const { rows: own } = await x.h.db.query<{ authz_result: string; reason_code: string }>(
+      "SELECT authz_result, reason_code FROM audit_log WHERE action = 'identity.sign_out_everywhere' AND actor_id = $1",
+      [w.admin.personId],
+    );
+    expect(own).toEqual([{ authz_result: 'ALLOWED', reason_code: 'SIGN_OUT_EVERYWHERE' }]);
+
+    // A staff member cannot use the customer self-service command on themselves or anyone.
+    const ops = await x.h.staff('OPS_FINANCE');
+    await expect(x.h.bus.execute(x.h.sessions.signOutEverywhere, {}, { actor: ops.actor })).rejects.toBeInstanceOf(ForbiddenError);
+
+    // Suspected compromise of another account: only a Fidelity admin, with a written reason.
+    const victim = await x.h.customer();
+    const victim2 = await x.h.customer((await x.h.db.query<{ phone_e164: string }>('SELECT phone_e164 FROM person WHERE id = $1', [victim.personId])).rows[0]!.phone_e164);
+    const input = { personId: victim.personId, reason: 'SIM swap reported by the family on the hotline' };
+    await expect(x.ops.run(ops.actor, x.ops.commands.revokePersonSessions, input)).rejects.toBeInstanceOf(ForbiddenError);
+    expect(await deniedAudit(ops.personId, 'identity.revoke_sessions')).toEqual([{ actor_role: 'OPS_FINANCE', reason_code: 'NO_PERMISSION' }]);
+    const fadmin = await x.h.staff('FIDELITY_ADMIN');
+    await expect(x.ops.run(fadmin.actor, x.ops.commands.revokePersonSessions, { ...input, reason: 'short' })).rejects.toThrow('REASON_REQUIRED');
+    expect(await x.h.auth.authenticate(victim.token)).not.toBeNull();
+    await expect(x.ops.run(fadmin.actor, x.ops.commands.revokePersonSessions, input)).resolves.toEqual({ revoked: 2 });
+    expect(await x.h.auth.authenticate(victim.token)).toBeNull();
+    expect(await x.h.auth.authenticate(victim2.token)).toBeNull();
+    // The admin's own staff session is untouched; the action is audited with the reason code.
+    expect(await x.h.auth.authenticate(fadmin.token)).not.toBeNull();
+    const { rows: adm } = await x.h.db.query<{ actor_role: string; subject_id: string; reason_code: string; after_hash: string | null }>(
+      "SELECT actor_role, subject_id, reason_code, after_hash FROM audit_log WHERE action = 'identity.revoke_sessions' AND authz_result = 'ALLOWED'",
+    );
+    expect(adm).toHaveLength(1);
+    expect(adm[0]).toMatchObject({ actor_role: 'FIDELITY_ADMIN', subject_id: victim.personId, reason_code: 'SUSPECTED_COMPROMISE' });
+    expect(adm[0]!.after_hash).toMatch(/^[0-9a-f]{64}$/);
+  });
 });
 
 describe('§A 4 — policy beneficiary, claimant, admin, payout recipient represented separately', () => {
-  it('four different people keep four separate records; no role is inferred; the benefit route stays blocked until approved', async () => {
+  it('each role is granted by the flow that establishes it, as its own row; none is inferred; the benefit route stays blocked until approved', async () => {
     t = await createOpsHarness();
     const x = t;
     const c = await x.claimCase('APPROVED');
     const admin = c.admin;
-    const approver = await x.approver(c.walletId);
-    const claimant = await x.h.customer();
-    const recipient = await x.h.customer();
-    const beneficiary = await x.h.customer(); // the policy's beneficiary: a Fidelity-side party, no wallet role
-    await x.h.grantRole(c.walletId, claimant.personId, 'CLAIMANT');
-    await x.h.grantRole(c.walletId, recipient.personId, 'PAYOUT_RECIPIENT');
+    // Family members join through the mandate (fixture: APPROVER role). No A4 role is inserted by SQL.
+    const claimant = await x.approver(c.walletId); // lodges the claim through the assigned agent
+    const recipient = await x.approver(c.walletId); // the family's proposed benefit recipient
+    const approver = await x.approver(c.walletId); // checks payouts; holds no other role
+    const outsider = await x.h.customer(); // no role on the case at all
+    const agent = await x.h.staff('AGENT');
+    await x.h.assign(agent.personId, c.walletId);
     const recipientIdNo = '63-777777R42';
-    await x.claims.linkClaim(admin.actor, { walletId: c.walletId, recipientPersonId: recipient.personId, recipientIdNumber: recipientIdNo });
-    const { rows: lr } = await x.h.db.query<{ claim_ref: string }>('SELECT claim_ref FROM fidelity_link WHERE wallet_id = $1', [c.walletId]);
-    const claimRef = lr[0]!.claim_ref;
+    const roles = async (personId: string) => (await rolesOf(c.walletId)).filter((r) => r.person_id === personId).map((r) => r.role).sort();
+    const linkAs = (actor: typeof admin.actor, over: { recipientPersonId?: string; recipientIdNumber?: string; claimantPersonId?: string } = {}) =>
+      x.claims.linkClaim(actor, { walletId: c.walletId, recipientPersonId: recipient.personId, recipientIdNumber: recipientIdNo, ...over });
 
-    // Stored separately: one row per role; nobody holds a role because of another one.
-    const expected = [
-      { person_id: admin.personId, role: 'ADMIN' },
-      { person_id: approver.personId, role: 'APPROVER' },
-      { person_id: claimant.personId, role: 'CLAIMANT' },
-      { person_id: recipient.personId, role: 'PAYOUT_RECIPIENT' },
-    ].sort((a, b) => (a.role + a.person_id).localeCompare(b.role + b.person_id));
-    expect(await rolesOf(c.walletId)).toEqual(expected);
-    const { rows: link } = await x.h.db.query<{ proposed_recipient: string; created_by: string; approved_recipient: string | null; route_status: string }>(
-      'SELECT proposed_recipient, created_by, approved_recipient, route_status FROM fidelity_link WHERE wallet_id = $1',
+    // An agent must name the family member they lodge for (never inferred), and only a family member;
+    // a customer can lodge only as themself.
+    await expect(linkAs(agent.actor)).rejects.toThrow('CLAIMANT_REQUIRED');
+    await expect(linkAs(agent.actor, { claimantPersonId: outsider.personId })).rejects.toThrow('CLAIMANT_NOT_ON_WALLET');
+    await expect(linkAs(admin.actor, { claimantPersonId: claimant.personId })).rejects.toThrow('CLAIMANT_MUST_BE_SELF');
+    await linkAs(agent.actor, { claimantPersonId: claimant.personId });
+    const { rows: lr } = await x.h.db.query<{
+      claim_ref: string; claimant_person: string; created_by: string; proposed_recipient: string; approved_recipient: string | null; route_status: string;
+    }>('SELECT claim_ref, claimant_person, created_by, proposed_recipient, approved_recipient, route_status FROM fidelity_link WHERE wallet_id = $1', [c.walletId]);
+    const claimRef = lr[0]!.claim_ref;
+    // The claimant is stored on the link, apart from who looked the policy up (created_by) and the recipient.
+    expect(lr[0]).toMatchObject({
+      claimant_person: claimant.personId,
+      created_by: admin.personId,
+      proposed_recipient: recipient.personId,
+      approved_recipient: null,
+      route_status: 'PENDING_APPROVAL',
+    });
+    expect(await roles(claimant.personId)).toEqual(['APPROVER', 'CLAIMANT']);
+    // Being nominated is not being a recipient or a beneficiary; the agent gets no family role.
+    expect(await roles(recipient.personId)).toEqual(['APPROVER']);
+    expect(await roles(agent.personId)).toEqual([]);
+    const { rows: grant } = await x.h.db.query<{ granted_by: string; grant_source: string }>(
+      "SELECT granted_by, grant_source FROM wallet_role WHERE wallet_id = $1 AND role = 'CLAIMANT'",
       [c.walletId],
     );
-    expect(link[0]).toEqual({ proposed_recipient: recipient.personId, created_by: admin.personId, approved_recipient: null, route_status: 'PENDING_APPROVAL' });
-    const { rows: w } = await x.h.db.query<{ admin_person: string }>('SELECT admin_person FROM wallet WHERE id = $1', [c.walletId]);
-    expect(w[0]!.admin_person).toBe(admin.personId);
-    expect(new Set([admin.personId, claimant.personId, recipient.personId, beneficiary.personId]).size).toBe(4);
+    expect(grant).toEqual([{ granted_by: agent.personId, grant_source: 'CLAIM_LINK' }]);
 
-    // The claimant and the recipient cannot request payouts; the claimant cannot check one.
+    // The claimant and the nominated recipient cannot request payouts.
     const parlour = await x.activePayee(admin, approver, c.walletId);
     await paid(c.slug, 30_00n);
     await expect(x.requestPayout(claimant, c.walletId, parlour, 5_00n)).rejects.toBeInstanceOf(ForbiddenError);
     await expect(x.requestPayout(recipient, c.walletId, parlour, 5_00n)).rejects.toBeInstanceOf(ForbiddenError);
-    const plan = await x.requestPayout(admin, c.walletId, parlour, 5_00n);
-    await expect(x.payouts.decide(claimant.actor, plan.approvalId!, 'APPROVED')).rejects.toBeInstanceOf(ForbiddenError);
 
     // Benefit route blocked until approved: claim APPROVED + money SETTLED is still not credited.
     x.fidelity.approve(claimRef);
@@ -312,21 +377,25 @@ describe('§A 4 — policy beneficiary, claimant, admin, payout recipient repres
     await x.deliverFidelity();
     expect(await benefit(c.walletId)).toEqual({ settled: 0n, available: 0n });
     expect((await x.claims.funds(admin.actor, c.walletId)).benefit.status).not.toBe('CREDITED');
+    // A payee bound to the recipient becoming ACTIVE (name check + dual approval) makes them a PAYOUT_RECIPIENT…
     const toRecipient = await x.activePayee(admin, approver, c.walletId, { holder: 'Recipient Person', personId: recipient.personId });
+    expect(await roles(recipient.personId)).toEqual(['APPROVER', 'PAYOUT_RECIPIENT']);
+    const { rows: pr } = await x.h.db.query<{ granted_by: string; grant_source: string }>(
+      "SELECT granted_by, grant_source FROM wallet_role WHERE wallet_id = $1 AND person_id = $2 AND role = 'PAYOUT_RECIPIENT'",
+      [c.walletId, recipient.personId],
+    );
+    expect(pr).toEqual([{ granted_by: admin.personId, grant_source: 'PAYEE_ACTIVE' }]);
+    // …which is still not the approved benefit route: the benefit cannot go out yet.
     await expect(x.requestPayout(admin, c.walletId, toRecipient, 1_00n, { source: 'FIDELITY_BENEFIT', purpose: 'FAMILY_BENEFICIARY' })).rejects.toBeInstanceOf(PayoutCheckError);
 
-    // The admin cannot redirect the benefit to themself: once lodged, a re-link is a no-op
-    // (ALREADY_LINKED) and the proposed recipient stays the recipient.
-    await x.claims.linkClaim(admin.actor, { walletId: c.walletId, recipientPersonId: admin.personId, recipientIdNumber: '63-000001A42' });
+    // The admin cannot redirect the benefit to themself: a re-link with another recipient is refused and audited.
+    await expect(linkAs(admin.actor, { recipientPersonId: admin.personId, recipientIdNumber: '63-000001A42' })).rejects.toThrow('RECIPIENT_CHANGE_REFUSED');
+    expect((await deniedAudit(admin.personId, 'claim.link')).map((d) => d.reason_code)).toContain('RECIPIENT_CHANGE_REFUSED');
     const { rows: still } = await x.h.db.query<{ proposed_recipient: string }>('SELECT proposed_recipient FROM fidelity_link WHERE wallet_id = $1', [c.walletId]);
     expect(still[0]!.proposed_recipient).toBe(recipient.personId);
-    const { rows: relink } = await x.h.db.query<{ reason_code: string }>(
-      "SELECT reason_code FROM audit_log WHERE action = 'claim.link' AND actor_id = $1 ORDER BY seq DESC LIMIT 1",
-      [admin.personId],
-    );
-    expect(relink[0]!.reason_code).toBe('ALREADY_LINKED');
 
-    // Fidelity approves the route to the recipient's ID ⇒ credited, recipient recorded as approved.
+    // Fidelity approves the route to the recipient's ID ⇒ credited. Fidelity's route identifies them as the
+    // POLICY_BENEFICIARY: its own row, source FIDELITY_ROUTE, granted by no Chema person.
     x.fidelity.routeTo(claimRef, recipientIdNo);
     await x.deliverFidelity();
     expect((await benefit(c.walletId)).settled).toBe(400_00n);
@@ -335,6 +404,12 @@ describe('§A 4 — policy beneficiary, claimant, admin, payout recipient repres
       [c.walletId],
     );
     expect(after[0]).toEqual({ approved_recipient: recipient.personId, route_status: 'APPROVED' });
+    expect(await roles(recipient.personId)).toEqual(['APPROVER', 'PAYOUT_RECIPIENT', 'POLICY_BENEFICIARY']);
+    const { rows: pb } = await x.h.db.query<{ granted_by: string | null; grant_source: string }>(
+      "SELECT granted_by, grant_source FROM wallet_role WHERE wallet_id = $1 AND role = 'POLICY_BENEFICIARY'",
+      [c.walletId],
+    );
+    expect(pb).toEqual([{ granted_by: null, grant_source: 'FIDELITY_ROUTE' }]);
 
     // Benefit to a payee of the admin: refused. To the approved recipient: accepted.
     const toAdmin = await x.activePayee(admin, approver, c.walletId, { holder: 'Admin Person', personId: admin.personId });
@@ -342,10 +417,15 @@ describe('§A 4 — policy beneficiary, claimant, admin, payout recipient repres
     const ben = await x.requestPayout(admin, c.walletId, toRecipient, 50_00n, { source: 'FIDELITY_BENEFIT', purpose: 'FAMILY_BENEFICIARY' });
     expect(ben.payouts[0]!.status).toBe('AWAITING_APPROVAL');
 
-    // Still nothing inferred: the policy beneficiary holds no wallet role, the roles are unchanged.
-    expect(await rolesOf(c.walletId)).toEqual(expected);
-    const { rows: bRoles } = await x.h.db.query('SELECT 1 FROM wallet_role WHERE person_id = $1', [beneficiary.personId]);
-    expect(bRoles).toHaveLength(0);
+    // Nothing inferred: the admin became a payout recipient only through their own ACTIVE payee (never a
+    // claimant or beneficiary); the approver and the outsider hold nothing extra.
+    expect(await roles(admin.personId)).toEqual(['ADMIN', 'PAYOUT_RECIPIENT']);
+    expect(await roles(approver.personId)).toEqual(['APPROVER']);
+    expect(await roles(claimant.personId)).toEqual(['APPROVER', 'CLAIMANT']);
+    const { rows: none } = await x.h.db.query('SELECT 1 FROM wallet_role WHERE person_id = $1', [outsider.personId]);
+    expect(none).toHaveLength(0);
+    // The beneficiary / recipient roles grant no money authority: the recipient still cannot request a payout.
+    await expect(x.requestPayout(recipient, c.walletId, toRecipient, 1_00n, { source: 'FIDELITY_BENEFIT', purpose: 'FAMILY_BENEFICIARY' })).rejects.toBeInstanceOf(ForbiddenError);
   });
 });
 

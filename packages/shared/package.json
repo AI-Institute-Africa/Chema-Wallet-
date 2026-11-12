@@ -7,7 +7,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./testing": "./src/testing.ts",
-    "./i18n": "./src/i18n/index.ts"
+    "./i18n": "./src/i18n/index.ts",
+    "./theme.css": "./src/theme/chema.css"
   },
   "dependencies": {
     "pg": "^8.23.1",

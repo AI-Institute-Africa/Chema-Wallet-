@@ -126,6 +126,11 @@ export interface CaseView {
   outcome: VerificationOutcome | null;
   reasonCode: VerificationReasonCode | null;
   decidedAt: string | null;
+  /**
+   * When a decision is due under `verification.sla_hours` (submittedAt + SLA)
+   * while the case is undecided. null ⇒ no SLA is promised (flag unset, D05) or decided.
+   */
+  dueBy: string | null;
 }
 
 export interface FraudFlagView {

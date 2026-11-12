@@ -1,9 +1,11 @@
 // HTTP hardening (P10, docs/10 "secure API + webhook controls"): response
 // security headers on every reply and a per-client rate limit.
 //
-// The limiter is an in-process fixed window. One API instance is the MVP
-// deployment; several instances would each allow the full budget, so a
-// shared store (Redis) is needed before scaling out (PROGRESS.md, Assumptions).
+// The limiter is a fixed window over a pluggable store: in-process by default
+// (one API instance), Redis when REDIS_URL is set so every instance draws on
+// the same budget. A store failure falls back to the in-process window for
+// that request (still limited, per instance) and is logged.
+import { createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 /** JSON API: nothing is rendered, framed, sniffed or cached by intermediaries. */
@@ -36,11 +38,74 @@ export interface RateLimitRule {
   match(req: FastifyRequest): boolean;
 }
 
+/** One fixed-window counter per key. */
+export interface RateLimitStore {
+  /** Count one hit on `key`; returns hits so far in the current window and ms until it resets. */
+  hit(key: string, windowMs: number): Promise<{ count: number; resetMs: number }>;
+}
+
+/** In-process windows (the default). Bounded: the oldest windows are dropped first. */
+export class MemoryRateLimitStore implements RateLimitStore {
+  private readonly windows = new Map<string, { start: number; count: number }>();
+
+  constructor(
+    private readonly now: () => number = Date.now,
+    private readonly maxKeys = 100_000,
+  ) {}
+
+  async hit(key: string, windowMs: number): Promise<{ count: number; resetMs: number }> {
+    const t = this.now();
+    let w = this.windows.get(key);
+    if (!w || t - w.start >= windowMs) {
+      this.windows.delete(key);
+      if (this.windows.size >= this.maxKeys) {
+        const oldest = this.windows.keys().next().value;
+        if (oldest !== undefined) this.windows.delete(oldest);
+      }
+      w = { start: t, count: 0 };
+      this.windows.set(key, w);
+    }
+    w.count += 1;
+    return { count: w.count, resetMs: w.start + windowMs - t };
+  }
+}
+
+/** The slice of an ioredis client the Redis store needs. */
+export interface RedisEvalClient {
+  eval(script: string, numKeys: number, ...args: (string | number)[]): Promise<unknown>;
+}
+
+// INCR + PEXPIRE in one atomic script: the first hit of a window sets its
+// expiry; a key that somehow lost its TTL gets one again (never immortal).
+const HIT_SCRIPT = `
+local c = redis.call('INCR', KEYS[1])
+if c == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end
+local t = redis.call('PTTL', KEYS[1])
+if t < 0 then redis.call('PEXPIRE', KEYS[1], ARGV[1]); t = tonumber(ARGV[1]) end
+return {c, t}`;
+
+/** Shared windows in Redis. Keys are hashed, so client addresses are not stored in Redis. */
+export class RedisRateLimitStore implements RateLimitStore {
+  constructor(
+    private readonly client: RedisEvalClient,
+    private readonly prefix = 'chema:rl:',
+  ) {}
+
+  async hit(key: string, windowMs: number): Promise<{ count: number; resetMs: number }> {
+    const k = `${this.prefix}${createHash('sha256').update(key).digest('hex').slice(0, 32)}`;
+    const out = await this.client.eval(HIT_SCRIPT, 1, k, Math.max(1, Math.trunc(windowMs)));
+    if (!Array.isArray(out) || out.length !== 2) throw new Error('unexpected rate-limit script reply');
+    return { count: Number(out[0]), resetMs: Number(out[1]) };
+  }
+}
+
 export interface RateLimitOptions {
   rules: readonly RateLimitRule[];
   now?: () => number;
-  /** Bound on tracked keys; the oldest windows are dropped first. */
+  /** Bound on tracked keys of the in-process store; the oldest windows are dropped first. */
   maxKeys?: number;
+  /** Shared store (Redis). Default: in-process. */
+  store?: RateLimitStore;
 }
 
 const POST = (req: FastifyRequest) => req.method === 'POST';
@@ -80,29 +145,23 @@ export function defaultRateLimitRules(env: NodeJS.ProcessEnv = process.env): Rat
 }
 
 export function registerRateLimit(app: FastifyInstance, opts: RateLimitOptions): void {
-  const now = opts.now ?? Date.now;
-  const maxKeys = opts.maxKeys ?? 100_000;
-  const windows = new Map<string, { start: number; count: number }>();
+  const local = new MemoryRateLimitStore(opts.now ?? Date.now, opts.maxKeys ?? 100_000);
+  const store = opts.store ?? local;
 
   app.addHook('onRequest', async (req, reply) => {
     if (req.method === 'OPTIONS') return;
-    const t = now();
     for (const rule of opts.rules) {
       if (!rule.match(req)) continue;
       const key = `${rule.name}|${req.ip}`;
-      let w = windows.get(key);
-      if (!w || t - w.start >= rule.windowMs) {
-        windows.delete(key);
-        if (windows.size >= maxKeys) {
-          const oldest = windows.keys().next().value;
-          if (oldest !== undefined) windows.delete(oldest);
-        }
-        w = { start: t, count: 0 };
-        windows.set(key, w);
+      let w: { count: number; resetMs: number };
+      try {
+        w = await store.hit(key, rule.windowMs);
+      } catch (err) {
+        req.log.warn({ err, bucket: rule.name }, 'rate-limit store unavailable; using the in-process window');
+        w = await local.hit(key, rule.windowMs);
       }
-      w.count += 1;
       if (w.count > rule.max) {
-        const retry = Math.max(1, Math.trunc((w.start + rule.windowMs - t + 999) / 1000)); // whole seconds, rounded up
+        const retry = Math.max(1, Math.trunc((w.resetMs + 999) / 1000)); // whole seconds, rounded up
         req.log.warn({ bucket: rule.name }, 'rate limited');
         return reply.code(429).header('retry-after', String(retry)).send({ error: 'rate_limited' });
       }

@@ -12,8 +12,10 @@ import {
   type Authorizer,
   type Command,
   type FlagService,
+  sha256Hex,
   type Subject,
 } from '@chema/core';
+import type { Queryable } from '@chema/shared';
 import { accountCode, getBalances, listWalletAccounts } from '@chema/ledger';
 import { iso, walletExists } from './util';
 
@@ -226,6 +228,51 @@ export function configView(deps: QueueDeps): Command<Record<string, never>, { fl
   };
 }
 
+// ── Mandate changes awaiting the verifier (docs/02 mandate re-check) ─────────
+
+export interface MandateChangeItem {
+  changeId: string;
+  walletId: string;
+  kind: string;
+  requestedAt: string;
+  /** The family checker's decision on the change's approval (null = not yet decided). */
+  checkerDecision: string | null;
+  evidenceCount: number;
+}
+
+/**
+ * PENDING mandate changes with no verifier outcome yet. A COMMUNITY_VERIFIER
+ * sees only wallets they are assigned to; oversight roles see all. Opening
+ * one and verifying it re-authorises on `mandate.verify`.
+ */
+export const mandateQueue: Command<Record<string, never>, MandateChangeItem[]> = {
+  name: 'mandate.queue',
+  async resolve() {
+    return { action: 'mandate.queue', subject: queueSubject('mandate_changes') };
+  },
+  async run(tx, _input, { actor }) {
+    const mine = actor.kind === 'STAFF' && actor.staffRole === 'COMMUNITY_VERIFIER';
+    const { rows } = await tx.query<{ id: string; wallet_id: string; kind: string; requested_at: Date; decision: string | null; n: number }>(
+      `SELECT c.id, c.wallet_id, c.kind, c.requested_at, a.decision, cardinality(c.evidence_docs) AS n
+         FROM mandate_change c JOIN wallet w ON w.id = c.wallet_id LEFT JOIN approval a ON a.id = c.approval_id
+        WHERE c.status = 'PENDING' AND c.verifier_outcome IS NULL
+          AND ($1::uuid IS NULL OR ${ASSIGNED_SQL})
+        ORDER BY c.requested_at, c.id LIMIT 200`,
+      [mine ? actor.personId : null],
+    );
+    return {
+      result: rows.map((r) => ({
+        changeId: r.id,
+        walletId: r.wallet_id,
+        kind: r.kind,
+        requestedAt: new Date(r.requested_at).toISOString(),
+        checkerDecision: r.decision,
+        evidenceCount: Number(r.n),
+      })),
+    };
+  },
+};
+
 // ── 10. Access review (export) ──────────────────────────────────────────────
 
 export interface AccessReviewRow {
@@ -241,36 +288,79 @@ export interface AccessReviewRow {
   createdAt: string | null;
 }
 
-export const accessReview: Command<Record<string, never>, { rows: AccessReviewRow[]; csv: string }> = {
+export interface AccessReviewSignoffView {
+  id: string;
+  reviewerPersonId: string;
+  reviewerRole: string;
+  periodFrom: string;
+  periodTo: string;
+  rowCount: number;
+  csvSha256: string;
+  reviewedAt: string;
+}
+
+export interface AccessReviewExport {
+  rows: AccessReviewRow[];
+  csv: string;
+  /** sha256 (hex) of `csv` exactly as exported: what a sign-off attests to. */
+  csvSha256: string;
+  rowCount: number;
+  /** Latest sign-offs, newest first. */
+  signoffs: AccessReviewSignoffView[];
+}
+
+/** The export as of now (also recomputed by the sign-off to prove it is current). */
+export async function accessReviewExport(q: Queryable): Promise<Omit<AccessReviewExport, 'signoffs'>> {
+  const { rows } = await q.query<{
+    id: string; person_id: string; login: string; staff_role: string; disabled_at: Date | null; mfa_enrolled_at: Date | null;
+    locked_until: Date | null; created_at: Date | null; last_login: Date | null; assignments: number;
+  }>(
+    `SELECT s.id, s.person_id, s.login, s.staff_role, s.disabled_at, s.mfa_enrolled_at, s.locked_until, s.created_at,
+            (SELECT max(a.created_at) FROM auth_session a WHERE a.staff_id = s.id) AS last_login,
+            (SELECT count(*)::int FROM staff_assignment x WHERE x.staff_person_id = s.person_id AND x.revoked_at IS NULL) AS assignments
+       FROM staff_account s ORDER BY s.staff_role, s.login`,
+  );
+  const out: AccessReviewRow[] = rows.map((r) => ({
+    staffId: r.id,
+    personId: r.person_id,
+    login: r.login,
+    role: r.staff_role,
+    disabled: r.disabled_at !== null,
+    mfaEnrolledAt: iso(r.mfa_enrolled_at),
+    lastLoginAt: iso(r.last_login),
+    lockedUntil: iso(r.locked_until),
+    activeAssignments: r.assignments,
+    createdAt: iso(r.created_at),
+  }));
+  const header = 'login,role,disabled,mfa_enrolled_at,last_login_at,active_assignments';
+  const csv = [header, ...out.map((r) => [r.login, r.role, r.disabled, r.mfaEnrolledAt ?? '', r.lastLoginAt ?? '', r.activeAssignments].join(','))].join('\n');
+  return { rows: out, csv, csvSha256: sha256Hex(csv), rowCount: out.length };
+}
+
+export const accessReview: Command<Record<string, never>, AccessReviewExport> = {
   name: 'role.review',
   async resolve() {
     return { action: 'role.review', subject: queueSubject('access_review') };
   },
   async run(tx) {
+    const exp = await accessReviewExport(tx);
     const { rows } = await tx.query<{
-      id: string; person_id: string; login: string; staff_role: string; disabled_at: Date | null; mfa_enrolled_at: Date | null;
-      locked_until: Date | null; created_at: Date | null; last_login: Date | null; assignments: number;
+      id: string; reviewer_person: string; reviewer_role: string; period_from: Date; period_to: Date; row_count: number; csv_sha256: string; reviewed_at: Date;
     }>(
-      `SELECT s.id, s.person_id, s.login, s.staff_role, s.disabled_at, s.mfa_enrolled_at, s.locked_until, s.created_at,
-              (SELECT max(a.created_at) FROM auth_session a WHERE a.staff_id = s.id) AS last_login,
-              (SELECT count(*)::int FROM staff_assignment x WHERE x.staff_person_id = s.person_id AND x.revoked_at IS NULL) AS assignments
-         FROM staff_account s ORDER BY s.staff_role, s.login`,
+      `SELECT id, reviewer_person, reviewer_role, period_from, period_to, row_count, csv_sha256, reviewed_at
+         FROM access_review_signoff ORDER BY reviewed_at DESC, id LIMIT 20`,
     );
-    const out: AccessReviewRow[] = rows.map((r) => ({
-      staffId: r.id,
-      personId: r.person_id,
-      login: r.login,
-      role: r.staff_role,
-      disabled: r.disabled_at !== null,
-      mfaEnrolledAt: iso(r.mfa_enrolled_at),
-      lastLoginAt: iso(r.last_login),
-      lockedUntil: iso(r.locked_until),
-      activeAssignments: r.assignments,
-      createdAt: iso(r.created_at),
+    const signoffs = rows.map((r) => ({
+      id: r.id,
+      reviewerPersonId: r.reviewer_person,
+      reviewerRole: r.reviewer_role,
+      periodFrom: new Date(r.period_from).toISOString(),
+      periodTo: new Date(r.period_to).toISOString(),
+      rowCount: r.row_count,
+      csvSha256: r.csv_sha256,
+      reviewedAt: new Date(r.reviewed_at).toISOString(),
     }));
-    const header = 'login,role,disabled,mfa_enrolled_at,last_login_at,active_assignments';
-    const csv = [header, ...out.map((r) => [r.login, r.role, r.disabled, r.mfaEnrolledAt ?? '', r.lastLoginAt ?? '', r.activeAssignments].join(','))].join('\n');
-    return { result: { rows: out, csv }, audit: { reasonCode: 'ACCESS_REVIEW_EXPORT' } };
+    return { result: { ...exp, signoffs }, audit: { reasonCode: 'ACCESS_REVIEW_EXPORT', after: { csvSha256: exp.csvSha256 } } };
   },
 };
 

@@ -1,4 +1,4 @@
-import { ConflictError, ForbiddenError, SYSTEM_ACTOR, type Actor } from '@chema/core';
+import { ConflictError, ForbiddenError, RefusedError, SYSTEM_ACTOR, type Actor } from '@chema/core';
 import { ensureSystemAccount, getBalances, LedgerValidationError, post } from '@chema/ledger';
 import { inTx } from '@chema/ledger/testing';
 import { money } from '@chema/shared';
@@ -231,6 +231,75 @@ describe('staff and role admin (docs/02 Staff, docs/12 queue 10)', () => {
     const conflicted = await t.h.staff('CLAIMS_OFFICER');
     await t.h.grantRole(w.walletId, conflicted.personId, 'APPROVER');
     await expect(t.ops.run(fa.actor, t.ops.commands.staffAssign, { staffPersonId: conflicted.personId, walletId: w.walletId })).rejects.toThrow('FAMILY_ROLE_CONFLICT');
+  });
+});
+
+describe('access review sign-off (docs/12 queue 10)', () => {
+  const NOTES = 'Reviewed every staff account against the HR roster; no exceptions.';
+
+  it('records who reviewed which exact export for which period; a stale export and a self-certifying admin are refused (audited)', async () => {
+    t = await createOpsHarness();
+    const x = t;
+    const auditor = await x.h.staff('AUDITOR');
+    const admin = await x.h.staff('FIDELITY_ADMIN');
+    const from = '2026-01-01T00:00:00.000Z';
+    // The admin changes staff access inside the period under review.
+    await x.ops.run(admin.actor, x.ops.commands.staffEnroll, { login: 'agent.review', role: 'AGENT' });
+
+    const exp = await x.ops.run(auditor.actor, x.ops.queues.accessReview, {});
+    expect(exp.csvSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(exp.rowCount).toBe(exp.rows.length);
+    expect(exp.signoffs).toEqual([]);
+    const input = { periodFrom: from, periodTo: x.h.now().toISOString(), rowCount: exp.rowCount, csvSha256: exp.csvSha256, notes: NOTES };
+
+    // Only an AUDITOR or a FIDELITY_ADMIN may sign; not ops/finance.
+    const ops = await x.h.staff('OPS_FINANCE');
+    await expect(x.ops.run(ops.actor, x.ops.commands.accessReviewSignoff, input)).rejects.toBeInstanceOf(ForbiddenError);
+    // ops was enrolled after the export: the auditor's export is now stale ⇒ refused, audited, nothing stored.
+    const stale = await x.ops.run(auditor.actor, x.ops.commands.accessReviewSignoff, input).catch((e: unknown) => e);
+    expect(stale).toBeInstanceOf(RefusedError);
+    expect((stale as RefusedError).reason).toBe('EXPORT_CHANGED');
+
+    const fresh = await x.ops.run(auditor.actor, x.ops.queues.accessReview, {});
+    const current = { ...input, periodTo: x.h.now().toISOString(), rowCount: fresh.rowCount, csvSha256: fresh.csvSha256 };
+    // The admin who enrolled someone during the period cannot certify that period.
+    await expect(x.ops.run(admin.actor, x.ops.commands.accessReviewSignoff, current)).rejects.toThrow('REVIEWER_CHANGED_ACCESS');
+    // Notes are required.
+    await expect(x.ops.run(auditor.actor, x.ops.commands.accessReviewSignoff, { ...current, notes: 'ok' })).rejects.toThrow('REASON_REQUIRED');
+    const { signoffId } = await x.ops.run(auditor.actor, x.ops.commands.accessReviewSignoff, current);
+
+    const { rows } = await x.h.db.query<Record<string, unknown>>('SELECT * FROM access_review_signoff');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: signoffId, reviewer_person: auditor.personId, reviewer_role: 'AUDITOR', row_count: fresh.rowCount, csv_sha256: fresh.csvSha256, notes: NOTES });
+    const { rows: audit } = await x.h.db.query<{ actor_id: string; authz_result: string; reason_code: string }>(
+      "SELECT actor_id, authz_result, reason_code FROM audit_log WHERE action = 'role.review.signoff' ORDER BY audit_log.seq",
+    );
+    expect(audit).toEqual([
+      { actor_id: ops.personId, authz_result: 'DENIED', reason_code: 'NO_PERMISSION' },
+      { actor_id: auditor.personId, authz_result: 'DENIED', reason_code: 'EXPORT_CHANGED' },
+      { actor_id: admin.personId, authz_result: 'DENIED', reason_code: 'REVIEWER_CHANGED_ACCESS' },
+      { actor_id: auditor.personId, authz_result: 'ALLOWED', reason_code: 'ACCESS_REVIEW_SIGNED' },
+    ]);
+    // The sign-off shows on the next export, and cannot be edited or deleted.
+    const next = await x.ops.run(auditor.actor, x.ops.queues.accessReview, {});
+    expect(next.signoffs).toEqual([expect.objectContaining({ id: signoffId, reviewerPersonId: auditor.personId, csvSha256: fresh.csvSha256 })]);
+    await expect(x.h.db.query("UPDATE access_review_signoff SET notes = 'rewritten after the fact' WHERE id = $1", [signoffId])).rejects.toThrow(/append-only/);
+    await expect(x.h.db.query('DELETE FROM access_review_signoff WHERE id = $1', [signoffId])).rejects.toThrow(/append-only/);
+  });
+
+  it('an admin who changed no access in the period may sign it', async () => {
+    t = await createOpsHarness();
+    const x = t;
+    const admin = await x.h.staff('FIDELITY_ADMIN');
+    const exp = await x.ops.run(admin.actor, x.ops.queues.accessReview, {});
+    const out = await x.ops.run(admin.actor, x.ops.commands.accessReviewSignoff, {
+      periodFrom: '2026-01-01T00:00:00.000Z',
+      periodTo: x.h.now().toISOString(),
+      rowCount: exp.rowCount,
+      csvSha256: exp.csvSha256,
+      notes: NOTES,
+    });
+    expect(out.signoffId).toMatch(/^[0-9a-f-]{36}$/);
   });
 });
 

@@ -143,6 +143,12 @@ export function createApiClient(opts: ApiClientOptions) {
       }),
     submit: (id: string) => call<{ caseId: string; status: WalletStatus }>('POST', `/wallets/${encodeURIComponent(id)}/submit`),
     appeal: (id: string, reason: string) => call<{ caseId: string; status: WalletStatus }>('POST', `/wallets/${encodeURIComponent(id)}/appeal`, { reason }),
+    /** UI redesign: the admin changes or clears the target (minor units as a string). */
+    updateTarget: (id: string, targetMinor: string | null) => call<WalletView>('PUT', `/wallets/${encodeURIComponent(id)}/target`, { targetMinor }),
+    /** Memorial photo: upload (scanned by the worker), then set once the scan is clean. */
+    uploadPhoto: (id: string, contentType: 'image/jpeg' | 'image/png', bytes: Uint8Array) =>
+      call<{ id: string }>('POST', `/wallets/${encodeURIComponent(id)}/photo`, { contentType, dataBase64: bytesToBase64(bytes) }),
+    setPhoto: (id: string, documentId: string | null) => call<unknown>('PUT', `/wallets/${encodeURIComponent(id)}/photo`, { documentId }),
   };
 }
 

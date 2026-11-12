@@ -1,7 +1,11 @@
 // Outbox worker: relays committed outbox_event rows to BullMQ and consumes them.
 // Handlers must be idempotent (delivery is at-least-once).
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import {
+  anchorHead,
   createCoreServices,
+  FileAnchorSink,
   LocalFsBlobStore,
   loadSecrets,
   MockMalwareScanner,
@@ -272,6 +276,35 @@ async function reconLoop(): Promise<void> {
   }
 }
 
+/**
+ * Audit-chain head → an append-only anchor outside the database (docs/10).
+ * Default: a JSONL file; in production point CHEMA_AUDIT_ANCHOR_FILE at
+ * write-once storage (object lock / WORM) the DB operators cannot rewrite.
+ */
+const anchorFile = process.env['CHEMA_AUDIT_ANCHOR_FILE'] ?? '.data/audit-anchors.jsonl';
+const anchorEveryMs = Number.parseInt(process.env['CHEMA_AUDIT_ANCHOR_INTERVAL_MS'] ?? '', 10) > 0
+  ? Number.parseInt(process.env['CHEMA_AUDIT_ANCHOR_INTERVAL_MS'] ?? '', 10)
+  : 5 * 60_000;
+async function anchorLoop(): Promise<void> {
+  const sink = new FileAnchorSink(anchorFile);
+  // undefined ⇒ anchorHead reads the sink's last anchor itself (first round, or after an error).
+  let last: Awaited<ReturnType<typeof anchorHead>> | undefined;
+  while (!stopping) {
+    try {
+      mkdirSync(dirname(anchorFile), { recursive: true });
+      const a = await anchorHead(db, sink, new Date(), last);
+      if (a) {
+        last = a;
+        log.info({ seq: a.seq }, 'audit head anchored');
+      }
+    } catch (err) {
+      last = undefined;
+      log.error({ err }, 'audit anchor error');
+    }
+    await new Promise((r) => setTimeout(r, anchorEveryMs));
+  }
+}
+
 async function shutdown(signal: string): Promise<void> {
   log.info({ signal }, 'worker shutting down');
   stopping = true;
@@ -292,3 +325,4 @@ void fidelityLoop();
 void payoutLoop();
 void governanceLoop();
 void whatsappLoop();
+void anchorLoop();

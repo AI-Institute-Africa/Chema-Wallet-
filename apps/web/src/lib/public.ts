@@ -30,6 +30,8 @@ export interface PublicPage {
   usage: { paidOut: MoneyJSON; byPurpose: { purpose: string; amount: MoneyJSON }[] } | null;
   tributes: PublicTribute[] | null;
   contribute: { currency: 'USD' | 'ZWG'; rails: string[]; min: MoneyJSON; max: MoneyJSON | null; groupsEnabled: boolean };
+  /** Only when the family chose to show it (privacy showPolicyNumber). A reference, not cover. */
+  policy?: { insurer: string; number: string };
 }
 
 export interface Disclosure {
@@ -85,7 +87,7 @@ export interface ContributeForm {
   contact?: { kind: 'PHONE' | 'EMAIL'; value: string };
 }
 
-export const PRIVACY_KEYS = ['showTotal', 'showUsageSummary', 'showPhoto', 'showContributorNames', 'showAmounts', 'showTributes'] as const;
+export const PRIVACY_KEYS = ['showTotal', 'showUsageSummary', 'showPhoto', 'showContributorNames', 'showAmounts', 'showTributes', 'showPolicyNumber'] as const;
 export type Privacy = Record<(typeof PRIVACY_KEYS)[number], boolean>;
 
 /** Display only: "1050" USD → "10.50 USD". Never parsed back. */

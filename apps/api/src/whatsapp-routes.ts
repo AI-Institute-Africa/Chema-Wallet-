@@ -6,6 +6,7 @@ import { ForbiddenError, publicActor, type CoreServices } from '@chema/core';
 import type { WhatsAppService } from '@chema/whatsapp';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { deviceOf } from './session';
 
 const Token = z.string().regex(/^[A-Za-z0-9_-]{20,128}$/);
 const Provider = z.enum(['simulator', 'meta']);
@@ -59,7 +60,7 @@ export function registerWhatsAppRoutes(app: FastifyInstance, core: CoreServices,
   app.post('/handoff/open', async (req) => {
     const { token } = body(z.object({ token: Token }), req);
     const h = req.headers.authorization;
-    const session = h?.startsWith('Bearer ') ? await core.auth.authenticate(h.slice(7).trim()) : null;
+    const session = h?.startsWith('Bearer ') ? await core.auth.authenticate(h.slice(7).trim(), { device: deviceOf(req) }) : null;
     return wa.open(token, session ?? publicActor({ channel: 'WEB', ip: req.ip }));
   });
 }

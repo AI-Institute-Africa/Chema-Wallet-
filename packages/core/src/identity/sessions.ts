@@ -122,6 +122,20 @@ export async function revokeSession(q: Queryable, sessionId: string, now: Date):
   ]);
 }
 
+/**
+ * Revoke every live session of one person of one kind ("sign out everywhere").
+ * Step-up grants of those sessions die with them (StepUpGrants.consume needs a
+ * live session); a WhatsApp conversation bound to one stops resolving.
+ */
+export async function revokeAllSessions(q: Queryable, personId: string, kind: 'CUSTOMER' | 'STAFF', now: Date): Promise<string[]> {
+  const { rows } = await q.query<{ id: string }>(
+    `UPDATE auth_session SET revoked_at = $3, updated_at = now()
+      WHERE person_id = $1 AND kind = $2 AND revoked_at IS NULL RETURNING id`,
+    [personId, kind, now.toISOString()],
+  );
+  return rows.map((r) => r.id);
+}
+
 export interface StepUpTarget {
   action: Action;
   subjectType: string;

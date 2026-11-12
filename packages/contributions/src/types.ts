@@ -12,6 +12,8 @@ export const PRIVACY_KEYS = [
   'showContributorNames',
   'showAmounts',
   'showTributes',
+  // UI redesign (2026-11-11): the Fidelity policy number on the public page. Personal data: off by default.
+  'showPolicyNumber',
 ] as const;
 export type PrivacyKey = (typeof PRIVACY_KEYS)[number];
 export type PrivacySettings = Record<PrivacyKey, boolean>;
@@ -28,6 +30,7 @@ export const DEFAULT_PRIVACY: PrivacySettings = {
   showContributorNames: false,
   showAmounts: false,
   showTributes: false,
+  showPolicyNumber: false,
 };
 
 /** Unknown keys and non-booleans in stored JSON are ignored (default applies). */
@@ -131,6 +134,11 @@ export interface PublicPageView {
   /** null ⇒ the family hides tributes. Newest first, never ranked by amount. */
   tributes: PublicTribute[] | null;
   contribute: { currency: Money['ccy']; rails: string[]; min: Money; max: Money | null; groupsEnabled: boolean };
+  /**
+   * Present ONLY when the family turned on showPolicyNumber and a policy number is
+   * on record. It is a reference, never a statement of cover or claim approval.
+   */
+  policy?: { insurer: string; number: string };
 }
 
 export interface ModerationQueueItem {
