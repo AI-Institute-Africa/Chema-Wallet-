@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Admin portal (Next.js, P09): staff login + MFA, role-gated queues, maker-checker, reports, audit explorer",
   "dependencies": {
+    "@chema/shared": "workspace:*",
     "next": "^16.4.6",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"

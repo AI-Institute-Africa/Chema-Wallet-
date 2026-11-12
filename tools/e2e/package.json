@@ -1,0 +1,13 @@
+{
+  "name": "@chema/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser click-through of apps/web and apps/admin (Playwright, mocked API)",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.58.2"
+  }
+}

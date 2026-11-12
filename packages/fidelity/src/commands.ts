@@ -6,8 +6,10 @@ import { randomUUID } from 'node:crypto';
 import {
   ConflictError,
   NotFoundError,
+  RefusedError,
   ValidationError,
   consumeApproval,
+  grantWalletRole,
   createApproval,
   hasConsent,
   sha256Hex,
@@ -162,6 +164,12 @@ export interface LookupView {
 }
 
 export interface LinkInput extends WalletInput {
+  /**
+   * The family member lodging the claim. A customer lodges for themself (may
+   * be omitted; any other person is refused); an assigned agent must name the
+   * family member they act for. Never inferred from the admin role.
+   */
+  claimantPersonId?: string;
   /** The family member proposed to receive the benefit. Never inferred (e.g. from the admin role). */
   recipientPersonId: string;
   /** Their national ID, compared (hashed) with the beneficiary on Fidelity's approved route. */
@@ -177,6 +185,17 @@ export interface UnblockInput extends WalletInput {
   recipientPersonId: string;
   /** Second call only: the approved `claim.route.unblock` approval. */
   approvalId?: string;
+}
+
+/** Who the claimant is (see LinkInput.claimantPersonId). */
+async function claimantOf(tx: Queryable, walletId: string, input: LinkInput, actor: Actor): Promise<string> {
+  if (actor.kind === 'CUSTOMER') {
+    if (input.claimantPersonId !== undefined && input.claimantPersonId !== actor.personId) throw new ConflictError('CLAIMANT_MUST_BE_SELF');
+    return actor.personId;
+  }
+  if (input.claimantPersonId === undefined) throw new ConflictError('CLAIMANT_REQUIRED');
+  if (!(await isFamilyMember(tx, walletId, input.claimantPersonId))) throw new ConflictError('CLAIMANT_NOT_ON_WALLET');
+  return input.claimantPersonId;
 }
 
 async function shareableDocument(tx: Queryable, walletId: string, documentId: string): Promise<boolean> {
@@ -271,7 +290,14 @@ export function claimCommands(deps: ClaimsDeps) {
     },
   };
 
-  /** Lodge or link the claim (queued call, idempotent on wallet + policy + deceased). */
+  /**
+   * Lodge or link the claim (queued call, idempotent on wallet + policy +
+   * deceased). The person lodging it is recorded as the claimant (set once,
+   * wallet role CLAIMANT): the customer themself, or — when an assigned agent
+   * lodges on the family's behalf — the family member the agent names. Once
+   * lodged, a replay with the same recipient is a no-op (ALREADY_LINKED); a
+   * different recipient is refused (RECIPIENT_CHANGE_REFUSED, audited, 409).
+   */
   const link: Command<LinkInput, { view: ClaimView; requestId: string | null }> = {
     name: 'claim.link',
     resolve: walletSubject(deps, 'claim.link', { gated: true }),
@@ -283,28 +309,32 @@ export function claimCommands(deps: ClaimsDeps) {
       if (!row || !row.lookup_outcome) throw new ConflictError('LOOKUP_REQUIRED');
       if (!LINKABLE_OUTCOMES.has(row.lookup_outcome)) throw new ConflictError(`LOOKUP_${row.lookup_outcome}`);
       if (row.link_state === 'DUPLICATE_CLAIM') throw new ConflictError('DUPLICATE_CLAIM');
-      if (row.link_state === 'LINKED') return { result: { view: await claimView(tx, wallet.id, row), requestId: null }, audit: { subjectId: row.id, reasonCode: 'ALREADY_LINKED' } };
 
       const idNumber = normId(input.recipientIdNumber);
       if (idNumber.length < 4 || idNumber.length > 32) throw new ValidationError('bad recipient ID number');
-      if (!(await isFamilyMember(tx, wallet.id, input.recipientPersonId))) throw new ConflictError('RECIPIENT_NOT_ON_WALLET');
       const hash = recipientHash(deps, idNumber);
+      const sameRecipient = row.proposed_recipient === input.recipientPersonId && row.proposed_recipient_id_hash === hash;
+      if (row.claim_key && !sameRecipient) throw new RefusedError('RECIPIENT_CHANGE_REFUSED');
+      if (row.link_state === 'LINKED') return { result: { view: await claimView(tx, wallet.id, row), requestId: null }, audit: { subjectId: row.id, reasonCode: 'ALREADY_LINKED' } };
+
+      if (!(await isFamilyMember(tx, wallet.id, input.recipientPersonId))) throw new ConflictError('RECIPIENT_NOT_ON_WALLET');
+      const claimant = await claimantOf(tx, wallet.id, input, ctx.actor);
       const policyNo = effectivePolicyNo(row);
       if (!policyNo) throw new ConflictError('LOOKUP_REQUIRED');
       const key = row.claim_key ?? claimKey(wallet.id, policyNo, wallet.deceased_name, wallet.date_of_death);
-      if (row.claim_key && (row.proposed_recipient !== input.recipientPersonId || row.proposed_recipient_id_hash !== hash)) {
-        throw new ConflictError('CLAIM_DETAILS_FROZEN');
-      }
       await tx.query(
         `UPDATE fidelity_link SET claim_key = $2, link_state = 'QUEUED', link_error = NULL,
-                proposed_recipient = $3, proposed_recipient_id_hash = $4 WHERE id = $1`,
-        [row.id, key, input.recipientPersonId, hash],
+                proposed_recipient = $3, proposed_recipient_id_hash = $4, claimant_person = COALESCE(claimant_person, $5) WHERE id = $1`,
+        [row.id, key, input.recipientPersonId, hash, claimant],
       );
+      const { rows: cl } = await tx.query<{ claimant_person: string }>('SELECT claimant_person FROM fidelity_link WHERE id = $1', [row.id]);
+      const recorded = cl[0]?.claimant_person ?? claimant;
+      await grantWalletRole(tx, { walletId: wallet.id, personId: recorded, role: 'CLAIMANT', source: 'CLAIM_LINK', grantedBy: ctx.actor.personId });
       const requestId = await enqueueRequest(tx, { linkId: row.id, walletId: wallet.id, kind: 'LINK_CLAIM', dedupeKey: `link:${key}:${randomUUID()}`, now });
       const after = await linkById(tx, row.id);
       return {
         result: { view: await claimView(tx, wallet.id, after), requestId },
-        audit: { subjectId: row.id, reasonCode: 'CLAIM_QUEUED', after: { linkState: 'QUEUED', by: ctx.actor.kind } },
+        audit: { subjectId: row.id, reasonCode: 'CLAIM_QUEUED', after: { linkState: 'QUEUED', by: ctx.actor.kind, claimant: recorded } },
       };
     },
   };
@@ -402,6 +432,8 @@ async function applyUnblock(
       WHERE id = $1`,
     [row.id, a.approvalId, a.externalRef, a.recipientPersonId],
   );
+  // The written approval names the benefit recipient (never the policy beneficiary: Fidelity named someone else).
+  await grantWalletRole(tx, { walletId: row.wallet_id, personId: a.recipientPersonId, role: 'PAYOUT_RECIPIENT', source: 'ROUTE_UNBLOCK', grantedBy: actor.personId });
   if (row.mismatch_hold_id) await releaseHold(tx, actor, row.mismatch_hold_id, `route approved: ${a.externalRef}`);
   if (row.mismatch_case_id) await closeCase(tx, row.mismatch_case_id, actor.personId, 'ROUTE_APPROVED_IN_WRITING');
   await emit(tx, 'benefit.route_unblocked', { walletId: row.wallet_id, linkId: row.id });

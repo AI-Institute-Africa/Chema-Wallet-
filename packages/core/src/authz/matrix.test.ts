@@ -74,6 +74,7 @@ const OWN_ROWS = new Set<Action>([
   'receipt.reissue',
   'tribute.manage_own',
   'approval.escalate',
+  'session.revoke_own',
 ]);
 
 function subjectFor(action: Action, persona: Persona): Subject {
@@ -141,7 +142,7 @@ const EXPECTED: Record<Action, Persona[]> = {
   'role.admin': ['fidelity_admin'],
   'consent.manage': CUSTOMERS,
   'consent.view': [...CUSTOMERS, 'auditor', 'fidelity_admin'],
-  'document.upload': ['admin', 'agent'],
+  'document.upload': ['admin', 'agent', 'opsfin'],
   'document.read': ['admin', 'agent', 'claims', 'verifier', 'auditor'],
   'document.delete': ['fidelity_admin'],
   'document.scan_result': ['system'],
@@ -155,6 +156,7 @@ const EXPECTED: Record<Action, Persona[]> = {
   'tribute.manage_own': [...CUSTOMERS, 'public'],
   'tribute.moderate': ['verifier', 'fidelity_admin'],
   'wallet.privacy.update': ['admin'],
+  'wallet.update_target': ['admin'],
   'wallet.photo.set': ['admin'],
   'group.create': CUSTOMERS,
   'notification.process': ['system'],
@@ -215,6 +217,11 @@ const EXPECTED: Record<Action, Persona[]> = {
   'report.regulator': ['auditor', 'fidelity_admin'],
   'audit.explore': ['opsfin', 'auditor', 'fidelity_admin'],
   'audit.verify': ['auditor', 'fidelity_admin'],
+  'session.revoke_own': ['admin', 'approver', 'contributor'],
+  'session.revoke_all': ['fidelity_admin'],
+  'role.review.signoff': ['auditor', 'fidelity_admin'],
+  'mandate.queue': ['verifier', 'fidelity_admin', 'auditor'],
+  'wallet.people.view': ['admin', 'approver'],
 };
 
 describe('permission matrix — every cell', () => {
@@ -372,6 +379,18 @@ describe('escalated approvals (unavailable approver, docs/02)', () => {
   it('escalation never lets the maker check their own request', () => {
     const d = authorize({ ...P.opsfin, action: 'payout.approve', subject: sub({ escalatedTo: 'OPS_FINANCE', makerPersonId: 'p-opsfin' }), payoutHighValueMinor: null });
     expect(d).toMatchObject({ allowed: false, reason: 'MAKER_CANNOT_CHECK' });
+  });
+});
+
+describe('roles established by flows grant no authority (docs/02, A4)', () => {
+  it('a customer holding only POLICY_BENEFICIARY / CLAIMANT / PAYOUT_RECIPIENT is a plain contributor', () => {
+    const holder = customer('p-holder', ['POLICY_BENEFICIARY', 'CLAIMANT', 'PAYOUT_RECIPIENT']);
+    for (const action of ACTIONS) {
+      const sub = subjectFor(action, 'contributor');
+      const subject: Subject = sub.ownerPersonId === 'p-contrib' ? { ...sub, ownerPersonId: 'p-holder' } : sub;
+      const asHolder = authorize({ ...holder, action, subject, payoutHighValueMinor: THRESHOLD });
+      expect(asHolder.allowed, action).toBe(EXPECTED[action].includes('contributor'));
+    }
   });
 });
 

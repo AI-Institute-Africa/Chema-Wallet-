@@ -9,7 +9,7 @@ import type { AuditSink } from '../audit/sink';
 import type { Authorizer, Decision } from '../authz/authorize';
 import { STEP_UP_ACTIONS, type Action } from '../authz/matrix';
 import { actorRoleLabel, type Actor, type Subject } from '../authz/types';
-import { ForbiddenError, NotFoundError } from '../errors';
+import { ForbiddenError, NotFoundError, RefusedError } from '../errors';
 
 declare const COMMAND_TX: unique symbol;
 /** A transaction opened by the CommandBus. Accept this (not Queryable) in mutating service code. */
@@ -66,6 +66,8 @@ class Denied extends Error {
     readonly reason: string,
     readonly subjectType: string,
     readonly subjectId: string,
+    /** Set when a handler refused with a RefusedError: rethrown after the denial is audited. */
+    readonly refusal?: RefusedError,
   ) {
     super(reason);
   }
@@ -113,7 +115,13 @@ export class CommandBus {
           if (!ok) throw new Denied('STEP_UP_REQUIRED', subject.type, subject.id);
         }
 
-        const out = await cmd.run(tx as CommandTx, input, { actor, action, subject, decision });
+        let out: CommandOutcome<O>;
+        try {
+          out = await cmd.run(tx as CommandTx, input, { actor, action, subject, decision });
+        } catch (err) {
+          if (err instanceof RefusedError) throw new Denied(err.reason, subject.type, subject.id, err);
+          throw err;
+        }
         const a = out.audit ?? {};
         await this.audit.record(
           {
@@ -142,6 +150,7 @@ export class CommandBus {
         reasonCode: err.reason,
         ts: this.clock(),
       });
+      if (err.refusal) throw err.refusal;
       if (err.reason === 'NOT_FOUND') throw new NotFoundError(err.subjectType, err.subjectId);
       throw new ForbiddenError(err.reason);
     }

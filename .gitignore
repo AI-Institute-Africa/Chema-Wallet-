@@ -11,3 +11,7 @@ next-env.d.ts
 
 # Local document blob store (ciphertext only, still never commit)
 .data/
+
+# Playwright (tools/e2e)
+test-results/
+playwright-report/

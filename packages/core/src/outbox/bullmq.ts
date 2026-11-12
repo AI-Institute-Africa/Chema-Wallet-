@@ -34,6 +34,14 @@ export function createRedis(url: string): Redis {
   return new Redis(redisOptions(url));
 }
 
+/**
+ * A client for request-path use (e.g. the API rate limiter): fails fast while
+ * Redis is down instead of queueing commands, so a request never hangs on it.
+ */
+export function createFastFailRedis(url: string): Redis {
+  return new Redis({ ...redisOptions(url), maxRetriesPerRequest: 1, enableOfflineQueue: false, connectTimeout: 2_000, commandTimeout: 500 });
+}
+
 export class BullMqJobQueue implements JobQueue {
   readonly queue: Queue;
   private readonly client: Redis;
