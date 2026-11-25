@@ -27,7 +27,7 @@ export interface PublicPage {
   photoPath: string | null;
   totals: { raised: MoneyJSON; target: MoneyJSON | null } | null;
   closed: boolean;
-  usage: { paidOut: MoneyJSON; byPurpose: { purpose: string; amount: MoneyJSON }[] } | null;
+  usage: { paidOut: MoneyJSON; byPurpose: { purpose: string; amount: MoneyJSON }[]; payouts?: { purpose: string; amount: MoneyJSON; at: string }[] } | null;
   tributes: PublicTribute[] | null;
   contribute: { currency: 'USD' | 'ZWG'; rails: string[]; min: MoneyJSON; max: MoneyJSON | null; groupsEnabled: boolean };
   /** Only when the family chose to show it (privacy showPolicyNumber). A reference, not cover. */

@@ -27,6 +27,7 @@ import { format, money, parseMinor, t, type Currency, type Money, type Queryable
 import { loadPublicWallet, loadWallet } from '@chema/wallet';
 import { linkToken, linkTokenValid, phoneHash, type ContributionKeys } from './keys';
 import type { ModerationRules } from './moderation';
+import { transactionCommands } from './transactions';
 import { contributionLimits, raisedTotal } from './public';
 import {
   CONTACT_KINDS,
@@ -730,7 +731,13 @@ export function contributionCommands(deps: ContributionDeps) {
     },
   };
 
-  return { create, view, listMine, reissueReceipt, manageTribute, settle, moderationQueue, moderate, viewPrivacy, updatePrivacy, setPhoto, createGroup };
+  const tx = transactionCommands(keys);
+
+  return {
+    create, view, listMine, reissueReceipt, manageTribute, settle, moderationQueue, moderate, viewPrivacy, updatePrivacy, setPhoto, createGroup,
+    transactions: tx.list,
+    transactionsCsv: tx.exportCsv,
+  };
 }
 
 export type ContributionCommands = ReturnType<typeof contributionCommands>;

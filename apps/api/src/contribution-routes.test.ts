@@ -209,3 +209,31 @@ describe('pre-payment disclosure', () => {
     expect((await app.inject({ method: 'POST', url: `/public/wallets/${slug}/quote`, payload: { rail: 'ONEMONEY', amount: { minor: '1000', ccy: 'USD' } } })).statusCode).toBe(404);
   });
 });
+
+describe('family transactions over HTTP', () => {
+  it('JSON statement (money as strings) and a CSV download, both no-store; strangers refused; bad cursor 400', async () => {
+    const { slug, walletId, admin } = await t.publicWallet();
+    const r = await app.inject({ method: 'POST', url: `/public/wallets/${slug}/contributions`, headers: { 'idempotency-key': `k-${randomUUID()}` }, payload: body });
+    expect(r.statusCode).toBe(201);
+    const { rows } = await t.h.db.query<{ provider_ref: string }>('SELECT provider_ref FROM payment WHERE wallet_id = $1', [walletId]);
+    t.ecocash.succeed(rows[0]!.provider_ref);
+    await t.deliver(t.ecocash);
+
+    const res = await app.inject({ method: 'GET', url: `/wallets/${walletId}/transactions`, headers: auth(admin.token) });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['cache-control']).toBe('no-store');
+    const v = res.json();
+    expect(v.lines[0]).toMatchObject({ kind: 'CONTRIBUTION', direction: 'IN', amount: { minor: '2500', ccy: 'USD' } });
+    expect(v.lines[0].contribution.name).toBe('Chipo Dube');
+
+    const csv = await app.inject({ method: 'GET', url: `/wallets/${walletId}/transactions/csv`, headers: auth(admin.token) });
+    expect(csv.statusCode).toBe(200);
+    expect(csv.headers['content-type']).toContain('text/csv');
+    expect(csv.headers['content-disposition']).toMatch(/^attachment; filename="chema-.*-transactions\.csv"$/);
+    expect(csv.body).toContain('Chipo Dube');
+
+    const stranger = await t.h.customer();
+    expect((await app.inject({ method: 'GET', url: `/wallets/${walletId}/transactions`, headers: auth(stranger.token) })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'GET', url: `/wallets/${walletId}/transactions?cursor=abc`, headers: auth(admin.token) })).statusCode).toBe(400);
+  });
+});

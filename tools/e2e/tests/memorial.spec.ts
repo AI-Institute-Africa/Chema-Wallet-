@@ -1,5 +1,6 @@
 // UI redesign (2026-11-11): one memorial page for contributors (/w/[slug]) and
 // the family admin (/wallets/[id]); maroon glass theme with a saved light/dark choice.
+import { txFixture } from './tx-fixture';
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { W, WEB, expectClean, guard, mockApi, open, signInWeb } from './support';
@@ -72,6 +73,13 @@ test('public memorial page: design layout, policy, tributes, chips within limits
   await expect(page.locator('.tribute')).toHaveCount(3);
   await expect(page.locator('.quick button')).toHaveText(['$5', '$10', '$20', '$50', 'Other']);
   await expect(page.locator('[data-testid=owner-bar]')).toHaveCount(0);
+  // Where the money went (Transactions 2026-11-25): purpose + amount + date only, never the payee.
+  const usage = page.locator('section.usage');
+  await expect(usage.getByRole('heading', { name: 'Where the money went' })).toBeVisible();
+  await expect(usage.locator('.u-bars li')).toHaveCount(2);
+  await expect(usage.locator('.u-list li').first()).toContainText('2026-11-22');
+  await expect(usage.locator('.u-list li').first()).toContainText('$20');
+  await expect(usage).not.toContainText('Doves');
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/mem-shot-public-light-desktop.png`, fullPage: true });
   await page.getByRole('radio', { name: 'CARD' }).click();
   await expect(page.getByText("You will be taken to the card provider's secure page")).toBeVisible();
@@ -131,6 +139,7 @@ test('the family admin sees the same memorial page, plus the owner bar and owner
     [`GET /wallets/${W}`]: ownerWallet,
     [`GET /public/wallets/${SLUG}`]: JSON.parse(fixtureText),
     [`GET /wallets/${W}/privacy`]: privacy,
+    [`GET /wallets/${W}/transactions`]: txFixture,
     [`PUT /wallets/${W}/target`]: { ...ownerWallet, targetMinor: '250000' },
   });
   await open(page, `${WEB}/wallets/${W}`);
@@ -140,6 +149,9 @@ test('the family admin sees the same memorial page, plus the owner bar and owner
   expect(await memorialText(page)).toEqual(publicView);
   await expect(page.getByRole('button', { name: "Add Sekuru Tendai Moyo's photo" })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Manage this wallet' })).toBeVisible();
+  // Recent activity (Transactions): the last lines with a link to the full statement.
+  await expect(page.locator('[data-testid=recent-activity]')).toContainText('Farai Katsande');
+  await expect(page.locator('[data-testid=recent-activity]').getByRole('link', { name: 'See all transactions' })).toHaveAttribute('href', `/wallets/${W}/transactions`);
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/mem-shot-owner-light-desktop.png`, fullPage: true });
 
   const editor = page.locator('[data-testid=target-view]');

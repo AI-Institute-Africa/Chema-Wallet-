@@ -88,7 +88,17 @@ export default function Payouts() {
       <ul className="plain" aria-label={t('fam.payouts.title')}>
         {list.data?.map((p) => (
           <li key={p.id}>
-            {t('fam.payouts.item', { amount: formatMoney(p.amount), payee: payeeName(p.payeeId), purpose: purposeLabel(p.purpose) })}
+            {t('fam.payouts.item', {
+              amount: formatMoney(p.amount),
+              payee: p.payeeLabel ? `${p.payeeLabel}${p.payeeMasked ? ` (${p.payeeMasked})` : ''}` : payeeName(p.payeeId),
+              purpose: purposeLabel(p.purpose),
+            })}
+            {p.purposeNote && (
+              <>
+                <br />
+                <span className="small">{t('fam.payouts.note_shown', { note: p.purposeNote })}</span>
+              </>
+            )}
             <br />
             <span className="muted small">
               {t(sourceKey(p.source))} · {payoutStatusLabel(p.status)}

@@ -202,6 +202,26 @@ export function registerContributionRoutes(app: FastifyInstance, core: CoreServi
   // ── Family: privacy + photo ────────────────────────────────────────────────
   const walletId = (req: FastifyRequest) => parse(z.object({ id: Uuid }), req.params).id;
 
+  // ── Family: transactions (what came in, where the money went) ─────────────
+  app.get('/wallets/:id/transactions', { preHandler: requireActor }, async (req, reply) => {
+    const q = parse(z.object({ cursor: z.string().regex(/^\d{1,19}$/).optional(), limit: z.coerce.number().int().min(1).max(200).optional() }), req.query);
+    const v = await core.bus.execute(
+      contributions.commands.transactions,
+      { walletId: walletId(req), ...(q.cursor ? { cursor: q.cursor } : {}), ...(q.limit ? { limit: q.limit } : {}) },
+      { actor: actorOf(req) },
+    );
+    return reply.header('cache-control', 'no-store').send(json(v));
+  });
+
+  app.get('/wallets/:id/transactions/csv', { preHandler: requireActor }, async (req, reply) => {
+    const v = await core.bus.execute(contributions.commands.transactionsCsv, { walletId: walletId(req) }, { actor: actorOf(req) });
+    return reply
+      .header('cache-control', 'no-store')
+      .header('content-type', 'text/csv; charset=utf-8')
+      .header('content-disposition', `attachment; filename="${v.filename}"`)
+      .send(v.csv);
+  });
+
   app.get('/wallets/:id/privacy', { preHandler: requireActor }, async (req, reply) => {
     const v = await core.bus.execute(contributions.commands.viewPrivacy, { walletId: walletId(req) }, { actor: actorOf(req) });
     return reply.header('cache-control', 'no-store').send(v);
