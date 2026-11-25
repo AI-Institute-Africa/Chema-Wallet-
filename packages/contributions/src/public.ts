@@ -68,6 +68,22 @@ async function usageByPurpose(q: Queryable, walletId: string, ccy: Currency): Pr
   return rows.map((r) => ({ purpose: r.purpose, amount: money(parseMinor(r.total), ccy) }));
 }
 
+/**
+ * Dated list behind the purpose totals ("12 Nov · Funeral parlour · $700"):
+ * confirmed community/group payouts, newest first. Purpose, amount and the
+ * confirmation date ONLY — never the payee, number or the family's note.
+ */
+async function usagePayouts(q: Queryable, walletId: string, ccy: Currency): Promise<{ purpose: string; amount: Money; at: string }[]> {
+  const { rows } = await q.query<{ purpose: string; amount_minor: string; confirmed_at: Date }>(
+    `SELECT purpose, amount_minor::text AS amount_minor, confirmed_at FROM payout_request
+      WHERE wallet_id = $1 AND currency = $2 AND status = 'CONFIRMED' AND source_kind IN ('COMMUNITY', 'GROUP')
+        AND confirmed_at IS NOT NULL
+      ORDER BY confirmed_at DESC LIMIT 50`,
+    [walletId, ccy],
+  );
+  return rows.map((r) => ({ purpose: r.purpose, amount: money(parseMinor(r.amount_minor), ccy), at: new Date(r.confirmed_at).toISOString() }));
+}
+
 /** A photo is public only with live consent AND the family's showPhoto toggle. */
 export async function photoVisible(q: Queryable, x: PublicExtras, p: PrivacySettings): Promise<boolean> {
   if (!p.showPhoto || !x.photo_doc || !x.photo_consent_id) return false;
@@ -151,7 +167,9 @@ export async function publicPage(q: Queryable, deps: PublicDeps, slug: string, l
       ? { raised: await raisedTotal(q, w.id, ccy), target: w.target_minor ? money(parseMinor(w.target_minor), ccy) : null }
       : null,
     closed,
-    usage: p.showUsageSummary ? { paidOut: await paidOut(q, w.id, ccy), byPurpose: await usageByPurpose(q, w.id, ccy) } : null,
+    usage: p.showUsageSummary
+      ? { paidOut: await paidOut(q, w.id, ccy), byPurpose: await usageByPurpose(q, w.id, ccy), payouts: await usagePayouts(q, w.id, ccy) }
+      : null,
     tributes: p.showTributes ? await publicTributes(q, w, p, { locale }) : null,
     contribute: {
       currency: ccy,

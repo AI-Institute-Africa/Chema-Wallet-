@@ -16,7 +16,7 @@
   "photoPath": null,
   "totals": { "raised": { "minor": "145000", "ccy": "USD" }, "target": { "minor": "200000", "ccy": "USD" } },
   "closed": false,
-  "usage": null,
+  "usage": {"paidOut": {"minor": "9000", "ccy": "USD"}, "byPurpose": [{"purpose": "PARLOUR", "amount": {"minor": "7000", "ccy": "USD"}}, {"purpose": "TRANSPORT", "amount": {"minor": "2000", "ccy": "USD"}}], "payouts": [{"purpose": "TRANSPORT", "amount": {"minor": "2000", "ccy": "USD"}, "at": "2026-11-22T10:00:00.000Z"}, {"purpose": "PARLOUR", "amount": {"minor": "7000", "ccy": "USD"}, "at": "2026-11-21T10:00:00.000Z"}]},
   "tributes": [
     { "id": "t1", "name": "Chipo & Family", "amount": { "minor": "5000", "ccy": "USD" }, "message": "Zororai murugare Sekuru Moyo. You will be dearly missed by all of us in Bulawayo.", "at": "2026-11-11T09:45:00.000Z" },
     { "id": "t2", "name": "Farai Katsande", "amount": { "minor": "3000", "ccy": "USD" }, "message": "My deepest condolences to the entire family during this difficult time.", "at": "2026-11-11T09:00:00.000Z" },

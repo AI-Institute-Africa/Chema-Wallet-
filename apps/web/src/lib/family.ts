@@ -74,12 +74,151 @@ export interface Payout {
   planId: string;
   payeeId: string;
   purpose: Purpose;
+  /** The family's note with the request (family + staff only). */
+  purposeNote?: string | null;
+  payeeLabel?: string | null;
+  /** Masked by the server; the full number is never returned. */
+  payeeMasked?: string | null;
   source: Source;
   amount: MoneyJSON;
   status: string;
   blockedBy: string | null;
   requestedAt: string;
   confirmedAt: string | null;
+}
+
+// ── Transactions (2026-11-25) ──────────────────────────────────────────────
+export type TxSource = 'COMMUNITY' | 'GROUP' | 'FIDELITY_BENEFIT';
+
+export interface TxContribution {
+  contributionId: string;
+  name: string;
+  publicName: string | null;
+  anonymousPublicly: boolean;
+  groupName: string | null;
+  rail: string;
+  receiptNo: string | null;
+  hasMessage: boolean;
+}
+
+export interface TxPayout {
+  payoutId: string;
+  purpose: string;
+  note: string | null;
+  payeeLabel: string | null;
+  payeeMasked: string | null;
+  rail: string;
+  providerRef: string | null;
+  confirmedAt: string | null;
+}
+
+export interface TxLine {
+  id: string;
+  seq: string;
+  at: string;
+  kind: string;
+  reversal: boolean;
+  reversesId: string | null;
+  reversedById: string | null;
+  direction: 'IN' | 'OUT';
+  source: TxSource;
+  groupName: string | null;
+  amount: MoneyJSON;
+  balanceAfter: MoneyJSON;
+  approvalRef: string | null;
+  contribution: TxContribution | null;
+  payout: TxPayout | null;
+  claimRef: string | null;
+  note: string | null;
+}
+
+export interface TxPending {
+  type: 'PAYOUT' | 'CONTRIBUTION';
+  id: string;
+  at: string;
+  status: string;
+  direction: 'IN' | 'OUT';
+  source: TxSource;
+  amount: MoneyJSON;
+  payout: TxPayout | null;
+  contribution: TxContribution | null;
+}
+
+export interface TxSummary {
+  source: TxSource;
+  groupName: string | null;
+  currency: string;
+  moneyIn: MoneyJSON;
+  moneyOut: MoneyJSON;
+  balance: MoneyJSON;
+  pending: MoneyJSON;
+  available: MoneyJSON;
+  reserved: MoneyJSON;
+}
+
+export interface WalletTransactions {
+  walletId: string;
+  summary: TxSummary[];
+  pending: TxPending[];
+  lines: TxLine[];
+  nextCursor: string | null;
+}
+
+export type TxFilter = 'ALL' | 'IN' | 'OUT' | 'PENDING';
+
+export function payeeText(p: { payeeLabel: string | null; payeeMasked: string | null } | null): string {
+  if (!p) return '';
+  return [p.payeeLabel, p.payeeMasked ? `(${p.payeeMasked})` : null].filter(Boolean).join(' ');
+}
+
+/** "Chipo Ndlovu contributed", "Paid Doves Funeral Services (+26377•••4567)", … */
+export function txTitle(l: TxLine): string {
+  const name = l.contribution?.name ?? '';
+  if (l.kind === 'CONTRIBUTION') return t(l.reversal ? 'fam.tx.contribution_reversed' : 'fam.tx.contribution', { name });
+  if (l.kind === 'REFUND') return t('fam.tx.refund', { name });
+  if (l.kind === 'CHARGEBACK') return t('fam.tx.chargeback', { name });
+  if (l.kind === 'PAYOUT') return t(l.reversal ? 'fam.tx.payout_returned' : 'fam.tx.payout', { payee: payeeText(l.payout) });
+  if (l.kind === 'BENEFIT') return t('fam.tx.benefit');
+  if (l.kind === 'ADJUSTMENT') return t('fam.tx.adjustment');
+  return t('fam.tx.other');
+}
+
+export function pendingTitle(p: TxPending): string {
+  if (p.payout) return t('fam.tx.payout_pending', { payee: payeeText(p.payout) });
+  return t('fam.tx.contribution_pending', { name: p.contribution?.name ?? '' });
+}
+
+export function txSourceLabel(source: TxSource, groupName: string | null): string {
+  if (source === 'FIDELITY_BENEFIT') return t('fam.tx.source.benefit');
+  if (source === 'GROUP') return t('fam.tx.source.group', { name: groupName ?? '' });
+  return t('fam.tx.source.community');
+}
+
+export function filterLines(lines: readonly TxLine[], f: TxFilter): TxLine[] {
+  if (f === 'IN') return lines.filter((l) => l.direction === 'IN');
+  if (f === 'OUT') return lines.filter((l) => l.direction === 'OUT');
+  if (f === 'PENDING') return [];
+  return [...lines];
+}
+
+/** Newest-first lines grouped under their calendar day (YYYY-MM-DD, local time). */
+export function groupByDay<T extends { at: string }>(items: readonly T[]): { day: string; items: T[] }[] {
+  const out: { day: string; items: T[] }[] = [];
+  for (const it of items) {
+    const d = new Date(it.at);
+    const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const last = out[out.length - 1];
+    if (last && last.day === day) last.items.push(it);
+    else out.push({ day, items: [it] });
+  }
+  return out;
+}
+
+/** Whole-number share of `part` in `total`, from minor units (no floats). */
+export function percentOf(part: MoneyJSON, total: MoneyJSON): number {
+  const tot = BigInt(total.minor);
+  if (tot <= 0n) return 0;
+  return Number((BigInt(part.minor) * 100n) / tot);
 }
 
 export interface PlanResult {
@@ -262,6 +401,19 @@ export function createFamilyClient(opts: { baseUrl: string; token?: () => string
       call<Payee>('POST', `${w(id)}/payees`, p, stepUp(stepUpToken)),
 
     payouts: (id: string) => call<Payout[]>('GET', `${w(id)}/payouts`),
+    transactions: (id: string, cursor?: string, limit?: number) =>
+      call<WalletTransactions>('GET', `${w(id)}/transactions${cursor || limit ? `?${new URLSearchParams({ ...(cursor ? { cursor } : {}), ...(limit ? { limit: String(limit) } : {}) }).toString()}` : ''}`),
+    /** CSV download needs the session header, so it is fetched, not linked. */
+    transactionsCsv: async (id: string): Promise<{ filename: string; csv: string }> => {
+      const headers: Record<string, string> = {};
+      const token = opts.token?.();
+      if (token) headers['authorization'] = `Bearer ${token}`;
+      const res = await doFetch(`${base}${w(id)}/transactions/csv`, { method: 'GET', headers, cache: 'no-store' });
+      if (!res.ok) throw new ApiError(res.status, 'error', []);
+      const cd = res.headers.get('content-disposition') ?? '';
+      const filename = /filename="([^"]+)"/.exec(cd)?.[1] ?? 'transactions.csv';
+      return { filename, csv: await res.text() };
+    },
     requestPayout: (id: string, body: ReturnType<typeof payoutBody>, stepUpToken: string) =>
       call<PlanResult>('POST', `${w(id)}/payouts`, body, stepUp(stepUpToken)),
     cancelPayout: (payoutId: string, reason: string) => call<unknown>('POST', `/payouts/${s(payoutId)}/cancel`, { reason }),

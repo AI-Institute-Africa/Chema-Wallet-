@@ -31,6 +31,7 @@ export const NAV = [
   ['claim', 'fam.nav.claim'],
   ['payees', 'fam.nav.payees'],
   ['payouts', 'fam.nav.payouts'],
+  ['transactions', 'fam.nav.transactions'],
   ['cases', 'fam.nav.cases'],
   ['closure', 'fam.nav.closure'],
 ] as const;

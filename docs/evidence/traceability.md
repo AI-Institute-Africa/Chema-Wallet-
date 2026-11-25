@@ -186,3 +186,16 @@ Abbreviations:
 | Theme toggle persists; pre-paint script carries the nonce | memorial.spec `theme: toggle switches light/dark…` | PASS |
 | Draft preview is private and cannot take contributions | memorial.spec `draft wallet: private preview…` | PASS |
 
+## Transactions (2026-11-25)
+
+| Item | Evidence | Status |
+|---|---|---|
+| Family statement: contributions with real names (anonymity flagged), payouts with purpose/note/payee (masked), provider reversal linked, refund linked, pending items, running balance = ledger | `packages/payouts/src/transactions.test.ts` › `lists contributions (real names, anonymity flagged)…` | PASS |
+| Paging newest first by journal seq | same file › `pages newest first by journal seq` | PASS |
+| Fidelity benefit kept as its own source | same file › `keeps the Fidelity benefit as its own source` | PASS |
+| Who may read (admin/approver yes; stranger, unassigned agent, guest no; denials audited) | same file › `who may read…` | PASS |
+| CSV export: one row per line, signed minor-unit amounts, formula neutralising | same file › `CSV export…`; `apps/api/src/contribution-routes.test.ts` › `family transactions over HTTP` | PASS |
+| PayoutView carries note + payee label + masked number | same file › `a payout view now carries…` | PASS |
+| Public usage list: purpose, amount, date only; hidden unless usage summary is on | same file › `public usage: where the money went` | PASS |
+| UI: statement page, filters, details, CSV download, nav, owner recent activity, public section | `tools/e2e/tests/transactions.spec.ts`; `memorial.spec.ts` (usage + recent activity); `apps/web/src/lib/transactions.test.ts` | PASS |
+

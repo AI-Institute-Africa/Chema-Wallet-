@@ -100,6 +100,9 @@ export interface PayoutRow {
   part_no: number;
   payee_id: string;
   purpose: PayoutPurpose;
+  purpose_note: string | null;
+  payee_label: string | null;
+  payee_masked: string | null;
   source_kind: PayoutSource;
   source_qualifier: string | null;
   account_id: string;
@@ -126,7 +129,9 @@ export interface PayoutRow {
 export const PAYOUT_COLS = `id, wallet_id, plan_id, part_no, payee_id, purpose, source_kind, source_qualifier, account_id, currency,
   amount_minor::text AS amount_minor, rail, requested_by, requested_at, reservation_id, approval_id, status, attempts,
   next_attempt_at, lease_until, provider_ref, submitted_at, last_error, confirmed_at, payout_journal_id,
-  override_approval_id, override_ref`;
+  override_approval_id, override_ref, purpose_note,
+  (SELECT label FROM payee WHERE payee.id = payout_request.payee_id) AS payee_label,
+  (SELECT destination_masked FROM payee WHERE payee.id = payout_request.payee_id) AS payee_masked`;
 
 export async function loadPayout(q: Queryable, id: string, lock = false): Promise<PayoutRow> {
   if (!isUuid(id)) throw new NotFoundError('payout_request', String(id));
@@ -143,6 +148,9 @@ export function payoutView(r: PayoutRow, blockedBy: string | null): PayoutView {
     partNo: r.part_no,
     payeeId: r.payee_id,
     purpose: r.purpose,
+    purposeNote: r.purpose_note,
+    payeeLabel: r.payee_label,
+    payeeMasked: r.payee_masked,
     source: r.source_kind,
     amount: money(parseMinor(r.amount_minor), r.currency),
     rail: r.rail,

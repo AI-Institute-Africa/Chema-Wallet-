@@ -152,6 +152,11 @@ export interface PayoutView {
   partNo: number;
   payeeId: string;
   purpose: PayoutPurpose;
+  /** Free text the family gave with the request (shown to the family and staff only). */
+  purposeNote: string | null;
+  /** Payee label and masked destination, for display; the full number is never returned. */
+  payeeLabel: string | null;
+  payeeMasked: string | null;
   source: PayoutSource;
   amount: Money;
   rail: string;

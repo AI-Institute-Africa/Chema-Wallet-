@@ -15,6 +15,7 @@ import { API_BASE, createPublicClient, type Privacy, type PublicPage } from '../
 import { api, getToken } from '../../../lib/session';
 import Memorial from '../../w/[slug]/memorial';
 import { PhotoControl, TargetEditor } from './owner-tools';
+import { RecentActivity } from './recent-activity';
 
 const publicClient = createPublicClient({ baseUrl: API_BASE, token: getToken });
 
@@ -170,6 +171,12 @@ export default function WalletHome() {
       )}
     </section>
   );
+  const ownerTop = (
+    <>
+      {banner}
+      {manage && live && <RecentActivity walletId={w.id} />}
+    </>
+  );
 
   const footer = (
     <div className="m-footer">
@@ -199,7 +206,7 @@ export default function WalletHome() {
     <Memorial
       page={shown}
       mode={live ? 'owner' : 'preview'}
-      banner={banner}
+      banner={ownerTop}
       footer={footer}
       photoControl={
         manage && live ? <PhotoControl walletId={w.id} name={w.deceasedName} hasPhoto={shown.photoPath !== null} onDone={(m) => { setMsg(m); reload(); }} /> : undefined

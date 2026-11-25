@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { C1, P1, P2, W, WEB, expectClean, guard, open, mockApi, signInWeb, usd } from './support';
+import { txFixture } from './tx-fixture';
 
 const wallet = {
   id: W,
@@ -73,6 +74,7 @@ test('wallet status links to the family screens', async ({ page }) => {
       contribute: { currency: 'USD', rails: ['ECOCASH'], min: usd('100'), max: usd('100000'), groupsEnabled: false },
     },
     'GET /public/wallets/rudo-moyo/qr.svg': {},
+    [`GET /wallets/${W}/transactions`]: txFixture,
   });
   await open(page, `${WEB}/wallets/${W}`);
   await expect(page.getByRole('navigation', { name: 'Manage this wallet' })).toBeVisible();

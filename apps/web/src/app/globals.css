@@ -129,3 +129,72 @@ input.amount { min-height: 56px; font-family: Arial, Helvetica, sans-serif; font
 .ph-action { position: absolute; left: 0; right: 0; top: 58%; display: flex; justify-content: center; }
 .ph-action .pill { background: var(--glass-2); border-color: var(--glass-border); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
 .m-footer { margin-top: 32px; max-width: 720px; }
+
+/* Transactions (2026-11-25): family statement */
+.tx-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 18px 0; }
+.tx-sum { border-radius: 20px; padding: 16px 18px; }
+.tx-sum > strong { display: block; font-size: 14px; color: var(--heading); margin-bottom: 8px; }
+.tx-sum dl { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 0 0 8px; }
+.tx-sum dl div { background: var(--inner); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; }
+.tx-sum dt { font-size: 11px; font-weight: 600; color: var(--muted); }
+.tx-sum dd { margin: 2px 0 0; font-size: 17px; font-weight: 800; color: var(--heading); }
+.tx-sum dl .now { background: var(--soft); }
+.tx-sum p { margin: 2px 0 0; }
+.tx-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0 14px; }
+.tx-filters, .tx-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.tx-list { border-radius: 22px; padding: 18px 18px 8px; margin-bottom: 18px; }
+.tx-list h2 { font-size: 16px; margin: 0 0 2px; }
+.tx-list h2 + p { margin: 0 0 6px; }
+.tx-day h3 { font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin: 14px 4px 6px; }
+.tx-rows { list-style: none; margin: 0 0 8px; padding: 0; }
+.tx-row { border-bottom: 1px solid var(--line); }
+.tx-row:last-child { border-bottom: 0; }
+.tx-main { all: unset; box-sizing: border-box; width: 100%; display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 12px 4px; cursor: pointer; }
+.tx-row.pending .tx-main { cursor: default; }
+.tx-main:focus-visible { outline: 2px solid var(--heading); outline-offset: 2px; border-radius: 12px; }
+.tx-icon { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; }
+.tx-icon svg { width: 18px; height: 18px; }
+.tx-icon.in { background: var(--success-soft); color: var(--heading); }
+.tx-icon.out { background: var(--brand); color: var(--on-brand); }
+.tx-row.pending .tx-icon { background: var(--inner); color: var(--muted); border: 1px dashed var(--line); }
+.tx-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tx-title { font-weight: 700; color: var(--heading); overflow-wrap: anywhere; }
+.tx-note { font-style: italic; color: var(--text); }
+.tx-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+.tx-tags .badge { font-size: 11px; }
+.tx-tags .badge.warn { background: var(--danger-soft); color: var(--danger); }
+.tx-amt { display: flex; flex-direction: column; align-items: flex-end; text-align: right; gap: 2px; white-space: nowrap; }
+.tx-value { font-size: 16px; font-weight: 800; }
+.tx-value.in { color: var(--heading); }
+.tx-value.out { color: var(--cta); }
+.tx-value.pending { color: var(--muted); }
+.tx-row.struck .tx-value { text-decoration: line-through; opacity: .7; }
+.tx-details { margin: 0 4px 12px 52px; padding: 10px 12px; background: var(--inner); border: 1px solid var(--line); border-radius: 12px; display: grid; gap: 4px; }
+.tx-details div { display: grid; grid-template-columns: minmax(90px, auto) 1fr; gap: 10px; }
+.tx-details dt { font-weight: 600; color: var(--muted); }
+.tx-details dd { margin: 0; overflow-wrap: anywhere; }
+.tx-recent { border-radius: 22px; padding: 16px 20px; margin-bottom: 24px; }
+.tx-recent h3 { margin: 0 0 4px; font-size: 16px; }
+@media (max-width: 520px) {
+  .tx-main { grid-template-columns: 32px minmax(0, 1fr) auto; gap: 10px; }
+  .tx-icon { width: 32px; height: 32px; }
+  .tx-sum dl { grid-template-columns: 1fr 1fr; }
+  .tx-sum dl .now { grid-column: span 2; }
+  .tx-details { margin-left: 4px; }
+}
+@media print {
+  .tx-toolbar, .tx-list .pill { display: none !important; }
+  .tx-list, .tx-sum { box-shadow: none; border: 1px solid #ccc; }
+}
+
+/* Public "Where the money went" */
+.usage .u-bars { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 10px; }
+.usage .u-bar-head { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; }
+.usage .u-bar-head b { color: var(--heading); }
+.usage .u-track { height: 8px; border-radius: 999px; background: var(--track); overflow: hidden; margin-top: 4px; }
+.usage .u-fill { height: 100%; background: var(--bar); border-radius: 999px; }
+.usage h4 { margin: 18px 0 6px; font-size: 14px; color: var(--heading); }
+.usage .u-list { list-style: none; margin: 0; padding: 0; }
+.usage .u-list li { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.usage .u-list li:last-child { border-bottom: 0; }
+.usage .u-list time { color: var(--muted); white-space: nowrap; }

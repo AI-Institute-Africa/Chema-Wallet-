@@ -7,7 +7,7 @@ import { t } from '@chema/shared/i18n';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { initials, moneyShort, orderRails, railName, relativeTime } from '../../../lib/memorial';
-import { API_BASE, formatMoney, type PublicPage } from '../../../lib/public';
+import { API_BASE, type PublicPage } from '../../../lib/public';
 import ContributeForm from './contribute-form';
 import LiveTotal from './live-total';
 import ShareButtons from './share-buttons';
@@ -24,6 +24,14 @@ const PURPOSE_KEYS = {
 function purposeLabel(purpose: string): string {
   const key = PURPOSE_KEYS[purpose as keyof typeof PURPOSE_KEYS];
   return key ? t(key) : t('payout.purpose.other_approved');
+}
+
+/** Whole-number share of a part in the paid-out total, from minor-unit strings (no floats). */
+function sharePercent(part: string, total: string): number {
+  const tot = BigInt(total);
+  if (tot <= 0n) return 0;
+  const pct = (BigInt(part) * 100n) / tot;
+  return Number(pct > 100n ? 100n : pct);
 }
 
 export type MemorialMode = 'public' | 'owner' | 'preview';
@@ -109,15 +117,39 @@ export default function Memorial({ page: p, mode, photoControl, targetEditor, ba
           {p.usage && (
             <section className="m-card panel usage">
               <h3>{t('page.usage.title')}</h3>
-              <p className="muted">{t('page.paid_out', { amount: formatMoney(p.usage.paidOut) })}</p>
+              <p className="muted">{t('page.paid_out', { amount: moneyShort(p.usage.paidOut) })}</p>
               {p.usage.byPurpose.length > 0 && (
-                <ul className="plain">
-                  {p.usage.byPurpose.map((u) => (
-                    <li key={u.purpose}>
-                      {purposeLabel(u.purpose)}: {moneyShort(u.amount)}
-                    </li>
-                  ))}
+                <ul className="u-bars">
+                  {p.usage.byPurpose.map((u) => {
+                    const pct = sharePercent(u.amount.minor, p.usage?.paidOut.minor ?? '0');
+                    return (
+                      <li key={u.purpose}>
+                        <div className="u-bar-head">
+                          <span>{purposeLabel(u.purpose)}</span>
+                          <b>{moneyShort(u.amount)}</b>
+                        </div>
+                        <div className="u-track" role="img" aria-label={t('page.usage.share', { percent: String(pct) })}>
+                          <div className="u-fill" style={{ width: `${pct}%` }} />
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
+              )}
+              {p.usage.payouts && p.usage.payouts.length > 0 && (
+                <>
+                  <h4>{t('page.usage.list_title')}</h4>
+                  <ul className="u-list">
+                    {p.usage.payouts.map((u, i) => (
+                      <li key={`${u.at}:${i}`}>
+                        <span>
+                          <time dateTime={u.at}>{u.at.slice(0, 10)}</time> · {purposeLabel(u.purpose)}
+                        </span>
+                        <b>{moneyShort(u.amount)}</b>
+                      </li>
+                    ))}
+                  </ul>
+                </>
               )}
             </section>
           )}
